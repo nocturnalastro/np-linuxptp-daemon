@@ -32,7 +32,7 @@ const (
 	CLEANUP = -12345678
 )
 
-var pm *daemon.ProcessManager
+var tpm *daemon.ProcessManagerMocker
 var registry *prometheus.Registry
 var logTestCases []synceLogTestCase
 
@@ -223,7 +223,7 @@ func setup() {
 	flag.StringVar(&logLevel, "logLevel", "4", "test")
 	flag.Lookup("v").Value.Set(logLevel)
 	daemon.InitializeOffsetMaps()
-	pm = daemon.NewProcessManager()
+	tpm = daemon.NewTestingProcessManager()
 	daemon.RegisterMetrics(MYNODE)
 }
 
@@ -250,8 +250,8 @@ func Test_ProcessPTPMetrics(t *testing.T) {
 	for _, tc := range testCases {
 		tc.node = MYNODE
 		tc.cleanupMetrics()
-		pm.SetTestData(tc.Name, tc.MessageTag, tc.Ifaces)
-		pm.RunProcessPTPMetrics(tc.log)
+		tpm.SetTestData(tc.Name, tc.MessageTag, tc.Ifaces)
+		tpm.RunProcessPTPMetrics(tc.log)
 
 		if tc.expectedOffset != SKIP {
 			ptpOffset := daemon.Offset.With(map[string]string{"from": tc.from, "process": tc.process, "node": tc.node, "iface": tc.iface})
@@ -295,7 +295,7 @@ func TestDaemon_ApplyHaProfiles(t *testing.T) {
 		Name:        pointer.String("ha_profile1"),
 		PtpSettings: map[string]string{daemon.PTP_HA_IDENTIFIER: "profile1,profile2"},
 	}
-	processManager := daemon.NewProcessManager()
+	processManager := daemon.NewTestingProcessManager()
 	ifaces1 := []config.Iface{
 		{
 			Name:     "ens2f2",
@@ -316,7 +316,7 @@ func TestDaemon_ApplyHaProfiles(t *testing.T) {
 	processManager.SetTestProfileProcess(*p1.Name, ifaces1, "socket1", "config1", p1)
 	processManager.SetTestProfileProcess(*p2.Name, ifaces2, "socket2", "config1", p2)
 	processManager.SetTestProfileProcess(*p3.Name, nil, "", "config1", p3)
-	dd := daemon.NewDaemonForTests(&daemon.ReadyTracker{}, processManager)
+	dd := daemon.NewDaemonForTests(&daemon.ReadyTracker{}, processManager.ProcessManager)
 	haProfiles, cmdLine := dd.ApplyHaProfiles(&p3, "")
 	assert.NotEmpty(t, cmdLine, "cmdLine is not empty")
 	assert.Equal(t, len(haProfiles), 2, "ha has two profiles")
@@ -436,7 +436,7 @@ func InitSynceLogTestCase() {
 func TestDaemon_ProcessSynceLogs(t *testing.T) {
 	// Printing results
 	InitSynceLogTestCase()
-	pm = daemon.NewProcessManager()
+	tpm = daemon.NewTestingProcessManager()
 	relations := synce.Relations{Devices: make([]*synce.Config, 1)}
 	relations.Devices[0] = &synce.Config{
 		Name:           "synce1",
@@ -448,13 +448,13 @@ func TestDaemon_ProcessSynceLogs(t *testing.T) {
 		LastQLState:    make(map[string]*synce.QualityLevelInfo),
 		LastClockState: "",
 	}
-	pm.UpdateSynceConfig(&relations)
+	tpm.UpdateSynceConfig(&relations)
 
 	for _, l := range logTestCases {
 		relations.Devices[0].NetworkOption = l.networkOption
 		relations.Devices[0].ExtendedTlv = l.extendedTvl
 
-		pm.RunSynceParser(l.output)
+		tpm.RunSynceParser(l.output)
 		if l.expectedSource != nil {
 			cq, _ := relations.Devices[0].ClockQuality(*relations.Devices[0].LastQLState[*l.expectedSource])
 			actualQuality := relations.Devices[0].LastQLState[*l.expectedSource]

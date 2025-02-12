@@ -84,81 +84,6 @@ type ProcessManager struct {
 	ptpEventHandler *event.EventHandler
 }
 
-// NewProcessManager is used by unit tests
-func NewProcessManager() *ProcessManager {
-	processPTP := &ptpProcess{}
-	processPTP.ptpClockThreshold = &ptpv1.PtpClockThreshold{
-		HoldOverTimeout:    5,
-		MaxOffsetThreshold: 100,
-		MinOffsetThreshold: -100,
-	}
-	return &ProcessManager{
-		process: []*ptpProcess{processPTP},
-	}
-}
-
-// NewDaemonForTests is used by unit tests
-func NewDaemonForTests(tracker *ReadyTracker, processManager *ProcessManager) *Daemon {
-	tracker.processManager = processManager
-	return &Daemon{
-		readyTracker:   tracker,
-		processManager: processManager,
-	}
-}
-
-// SetTestProfileProcess ...
-func (p *ProcessManager) SetTestProfileProcess(name string, ifaces config.IFaces, socketPath,
-	processConfigPath string, nodeProfile ptpv1.PtpProfile) {
-	p.process = append(p.process, &ptpProcess{
-		name:              name,
-		ifaces:            ifaces,
-		processSocketPath: socketPath,
-		processConfigPath: processConfigPath,
-		execMutex:         sync.Mutex{},
-		nodeProfile:       nodeProfile,
-	})
-}
-
-// SetTestData is used by unit tests
-func (p *ProcessManager) SetTestData(name, msgTag string, ifaces config.IFaces) {
-	if len(p.process) < 1 || p.process[0] == nil {
-		glog.Error("process is not initialized in SetTestData()")
-		return
-	}
-	p.process[0].name = name
-	p.process[0].messageTag = msgTag
-	p.process[0].ifaces = ifaces
-}
-
-// RunProcessPTPMetrics is used by unit tests
-func (p *ProcessManager) RunProcessPTPMetrics(log string) {
-	if len(p.process) < 1 || p.process[0] == nil {
-		glog.Error("process is not initialized in RunProcessPTPMetrics()")
-		return
-	}
-	p.process[0].processPTPMetrics(log)
-}
-
-// RunSynceParser is used by unit tests
-func (p *ProcessManager) RunSynceParser(log string) {
-	if len(p.process) < 1 || p.process[0] == nil {
-		glog.Error("process is not initialized in RunProcessPTPMetrics()")
-		return
-	}
-	logEntry := synce.ParseLog(log)
-	p.process[0].ProcessSynceEvents(logEntry)
-}
-
-// UpdateSynceConfig is used by unit tests
-func (p *ProcessManager) UpdateSynceConfig(config *synce.Relations) {
-	if len(p.process) < 1 || p.process[0] == nil {
-		glog.Error("process is not initialized in RunProcessPTPMetrics()")
-		return
-	}
-	p.process[0].syncERelations = config
-
-}
-
 type ptpProcess struct {
 	name                string
 	ifaces              config.IFaces
@@ -1454,4 +1379,85 @@ func containsAny(output string, indicators ...string) bool {
 		}
 	}
 	return false
+}
+
+type ProcessManagerMocker struct {
+	ProcessManager *ProcessManager
+}
+
+// NewTestingProcessManager is used by unit tests
+func NewTestingProcessManager() *ProcessManagerMocker {
+	processPTP := &ptpProcess{}
+	processPTP.ptpClockThreshold = &ptpv1.PtpClockThreshold{
+		HoldOverTimeout:    5,
+		MaxOffsetThreshold: 100,
+		MinOffsetThreshold: -100,
+	}
+	return &ProcessManagerMocker{
+		ProcessManager: &ProcessManager{
+			process: []*ptpProcess{processPTP},
+		},
+	}
+}
+
+// SetTestProfileProcess ...
+func (p *ProcessManagerMocker) SetTestProfileProcess(name string, ifaces config.IFaces, socketPath,
+	processConfigPath string, nodeProfile ptpv1.PtpProfile) {
+	p.ProcessManager.process = append(p.ProcessManager.process, &ptpProcess{
+		name:              name,
+		ifaces:            ifaces,
+		processSocketPath: socketPath,
+		processConfigPath: processConfigPath,
+		execMutex:         sync.Mutex{},
+		nodeProfile:       nodeProfile,
+	})
+}
+
+// SetTestData is used by unit tests
+func (p *ProcessManagerMocker) SetTestData(name, msgTag string, ifaces config.IFaces) {
+	if len(p.ProcessManager.process) < 1 || p.ProcessManager.process[0] == nil {
+		glog.Error("process is not initialized in SetTestData()")
+		return
+	}
+	p.ProcessManager.process[0].name = name
+	p.ProcessManager.process[0].messageTag = msgTag
+	p.ProcessManager.process[0].ifaces = ifaces
+}
+
+// RunProcessPTPMetrics is used by unit tests
+func (p *ProcessManagerMocker) RunProcessPTPMetrics(log string) {
+	if len(p.ProcessManager.process) < 1 || p.ProcessManager.process[0] == nil {
+		glog.Error("process is not initialized in RunProcessPTPMetrics()")
+		return
+	}
+	p.ProcessManager.process[0].processPTPMetrics(log)
+}
+
+// RunSynceParser is used by unit tests
+func (p *ProcessManagerMocker) RunSynceParser(log string) {
+	if len(p.ProcessManager.process) < 1 || p.ProcessManager.process[0] == nil {
+		glog.Error("process is not initialized in RunProcessPTPMetrics()")
+		return
+	}
+	logEntry := synce.ParseLog(log)
+	p.ProcessManager.process[0].ProcessSynceEvents(logEntry)
+}
+
+// UpdateSynceConfig is used by unit tests
+func (p *ProcessManagerMocker) UpdateSynceConfig(config *synce.Relations) {
+	if len(p.ProcessManager.process) < 1 || p.ProcessManager.process[0] == nil {
+		glog.Error("process is not initialized in RunProcessPTPMetrics()")
+		return
+	}
+	p.ProcessManager.process[0].syncERelations = config
+
+}
+
+// NewDaemonForTests is used by unit tests
+func NewDaemonForTests(tracker *ReadyTracker, processManager *ProcessManager) *Daemon {
+	tracker.processManager = processManager
+	return &Daemon{
+		readyTracker:   tracker,
+		processManager: processManager,
+	}
 }
