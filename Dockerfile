@@ -2,6 +2,7 @@ FROM golang:1.23.5 AS builder
 WORKDIR /go/src/github.com/k8snetworkplumbingwg/linuxptp-daemon
 COPY . .
 RUN make clean && make
+RUN cd ptp_log_parsing; go build cmd/ublox_logger.go; cd ..
 
 FROM quay.io/centos/centos:stream9
 
@@ -16,7 +17,7 @@ RUN ln -s /usr/bin/gpspipe /usr/local/bin/gpspipe
 RUN ln -s /usr/sbin/gpsd /usr/local/sbin/gpsd
 RUN ln -s /usr/bin/ubxtool /usr/local/bin/ubxtool
 
-
 COPY --from=builder /go/src/github.com/k8snetworkplumbingwg/linuxptp-daemon/bin/ptp /usr/local/bin/
+COPY --from=builder /go/src/github.com/k8snetworkplumbingwg/linuxptp-daemon/ptp_log_parsing/ublox_logger /usr/local/bin/
 
 CMD ["/usr/local/bin/ptp"]
