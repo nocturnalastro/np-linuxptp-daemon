@@ -1,29 +1,14 @@
 package ublox
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"ptplogparser/pkg/events"
 	"ptplogparser/pkg/process"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/golang/glog"
-)
-
-const (
-	pollWait      = 1000000000
-	allowedMissed = 3
-	PollInterval  = 1 * time.Second
-	PopTimeout    = 1 * time.Microsecond
-)
-
-var (
-	protoVerRegex = regexp.MustCompile(`PROTVER=+(\d+)`)
 )
 
 type InstantValues struct {
@@ -69,142 +54,66 @@ func (v *InstantValues) SetTimeLs(timeLs *TimeLs) {
 	v.stale = false
 }
 
-type UbxProcess struct {
-	ubxtoolPath string
-
-	statusMutex sync.RWMutex
-	status      process.Status
-
-	ch     chan<- process.Event
-	cmd    *exec.Cmd
-	reader *bufio.Reader
+type UbxParser struct {
+	process *UbxProcess
+	inChan  <-chan string
+	outChan chan<- events.Event
+	quit    chan bool
 
 	valuesMutex sync.Mutex
 	values      InstantValues
-
-	missedTicks int8
+	wg          sync.WaitGroup
 }
 
-func New(ch chan<- process.Event) process.Process {
-
-	return &UbxProcess{
-		ubxtoolPath: "/usr/local/bin/ubxtool",
-		status:      process.New,
-		ch:          ch,
+func NewParser(inChan <-chan string, outChan chan<- events.Event, process *process.Process) *UbxParser {
+	return &UbxParser{
+		inChan:  inChan,
+		outChan: outChan,
+		quit:    make(chan bool, 2),
 	}
 }
 
-func (u *UbxProcess) Name() string {
-	return "ublox"
+func (p *UbxParser) Start() {
+	p.values.Reset()
+	p.process.Start()
+	go p.parse()
+	go p.processEvents()
 }
 
-func (u *UbxProcess) Status() process.Status {
-	u.statusMutex.RLock()
-	defer u.statusMutex.RUnlock()
-	return u.status
-}
-
-func (u *UbxProcess) setStatus(val process.Status) {
-	u.statusMutex.Lock()
-	u.status = val
-	u.statusMutex.Unlock()
-}
-
-func (u *UbxProcess) Start() error {
-	u.values.Reset()
-
-	if u.Status() != process.New && u.Status() != process.Dead {
-		return nil
+func (p *UbxParser) Stop(wait bool) {
+	p.quit <- true
+	p.quit <- true
+	p.process.Stop()
+	if wait {
+		p.wg.Wait()
 	}
-	err := u.start()
-	if err != nil {
-		return err
-	}
-	go u.processReads()
-	go u.processEvents()
-	return nil
+
 }
 
-func (u *UbxProcess) Reset() {
-	pid := u.cmd.Process.Pid
-	glog.Infof("Stopping ubxtool polling with PID=%d", pid)
-	_ = u.cmd.Process.Kill()
-	if u.Status() != process.Stopped {
-		u.setStatus(process.Dead)
-	}
-	u.cmd.Wait()
-	u.start()
-}
-
-func (u *UbxProcess) Stop() error {
-	pid := u.cmd.Process.Pid
-	glog.Infof("Stopping ubxtool polling with PID=%d", pid)
-	u.setStatus(process.Stopped)
-	_ = u.cmd.Process.Kill()
-	u.cmd.Wait()
-	return nil
-}
-
-func (u *UbxProcess) start() error {
-	wait := fmt.Sprintf("%d", pollWait)
-	fmt.Println("python3", "-u", u.ubxtoolPath, "-t", "-P", "29.20", "-w", wait)
-	u.cmd = exec.Command("python3", "-u", u.ubxtoolPath, "-t", "-P", "29.20", "-w", wait)
-	stdoutreader, _ := u.cmd.StdoutPipe()
-	// u.reader = bufio.NewReader(io.TeeReader(stdoutreader, os.Stdout))
-	u.reader = bufio.NewReader(stdoutreader)
-	err := u.cmd.Start()
-	if err != nil {
-		glog.Errorf("Failed to start ublox poll: %s", err.Error())
-		u.setStatus(process.Stopped)
-		return fmt.Errorf("failed to start ublox poll: %w", err)
-	} else {
-		u.setStatus(process.Running)
-		pid := u.cmd.Process.Pid
-		glog.Infof("Starting ubxtool polling with PID=%d", pid)
-	}
-	return nil
-}
-
-const timeLsResultLines = 4
-
-func (u *UbxProcess) processReads() {
+func (p *UbxParser) parse() {
+	p.wg.Add(1)
+	defer p.wg.Done()
 	for {
-		scanner := bufio.NewScanner(u.reader)
-		for scanner.Scan() {
-
-			line := scanner.Text()
-			// fmt.Println(line)
-			if line == "" {
-				continue
-			}
+		select {
+		case line := <-p.inChan:
 			if strings.Contains(line, "UBX-NAV-CLOCK") {
-				if !scanner.Scan() {
-					break
-				}
-				u.values.SetOffset(extractOffset(scanner.Text()))
+				nextLine := <-p.inChan
+				p.values.SetOffset(extractOffset(nextLine))
 			} else if strings.Contains(line, "UBX-NAV-STATUS") {
-				if !scanner.Scan() {
-					break
-				}
-				u.values.SetGPSFix(extractNavStatus(scanner.Text()))
+				nextLine := <-p.inChan
+				p.values.SetGPSFix(extractNavStatus(nextLine))
 			} else if strings.Contains(line, "UBX-NAV-TIMELS") {
 				var lines []string
 				for i := 0; i < timeLsResultLines; i++ {
-					if !scanner.Scan() {
-						goto doubleBreak
-					}
-					lines = append(lines, scanner.Text())
+					nextLine := <-p.inChan
+					lines = append(lines, nextLine)
 				}
-				u.values.SetTimeLs(extractLeapSec(lines))
+				p.values.SetTimeLs(extractLeapSec(lines))
 			}
-
-		}
-	doubleBreak:
-		if err := scanner.Err(); err != nil {
-			glog.Errorf("ublox poll thread error %s", err)
-		} else {
-			// glog.Errorf("ublox poll exited with EOF, will retry")
-			continue
+		case <-p.quit:
+			return
+		default:
+			time.Sleep(time.Nanosecond)
 		}
 	}
 }
@@ -215,8 +124,8 @@ type UBloxEvent struct {
 	TimeLs *TimeLs `json:"timeLs"`
 }
 
-func (e *UBloxEvent) SubType() process.EventType {
-	return process.GNSSMetric
+func (e *UBloxEvent) SubType() events.EventType {
+	return events.GNSSMetric
 }
 
 func (e *UBloxEvent) Marshal() ([]byte, error) {
@@ -231,17 +140,19 @@ func (e *UBloxEvent) Value() map[string]any {
 	}
 }
 
-func (u *UbxProcess) processEvents() {
+func (p *UbxParser) processEvents() {
+	p.wg.Add(1)
+	defer p.wg.Done()
+
 	ticker := time.NewTicker(PollInterval)
 	missedTicks := 0
-
 	for {
 		select {
 		case <-ticker.C:
-			if u.values.IsStale() {
+			if p.values.IsStale() {
 				missedTicks++
 				if missedTicks > allowedMissed {
-					u.Reset()
+					p.process.Reset()
 					missedTicks = 0
 				}
 				continue
@@ -249,16 +160,18 @@ func (u *UbxProcess) processEvents() {
 				missedTicks = 0
 			}
 
-			u.valuesMutex.Lock()
+			p.valuesMutex.Lock()
 			event := UBloxEvent{
-				GPSFix: u.values.GPSFix,
-				Offset: u.values.Offset,
-				TimeLs: u.values.TimeLs,
+				GPSFix: p.values.GPSFix,
+				Offset: p.values.Offset,
+				TimeLs: p.values.TimeLs,
 			}
-			u.valuesMutex.Unlock()
-			u.values.Reset()
+			p.valuesMutex.Unlock()
+			p.values.Reset()
 
-			fmt.Println(event)
+			p.outChan <- &event
+		case <-p.quit:
+			return
 		}
 	}
 }
