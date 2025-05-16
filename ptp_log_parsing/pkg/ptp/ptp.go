@@ -27,7 +27,7 @@ func (s State) String() string {
 	}
 }
 
-func StateFromPtp4l(s string) State {
+func StateFromString(s string) State {
 	switch s {
 	case "s0", "s1":
 		return FreeRun

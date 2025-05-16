@@ -77,6 +77,7 @@ var (
 // example lines
 // ts2phc[82674.465]:    [ts2phc.0.config]   ens2f1 master  offset          0 s2 freq      -0
 // ts2phc[521734.693]:   [ts2phc.0.config:6] /dev/ptp6      offset          0 s2 freq      -0
+
 // ignored lines
 // ts2phc[82674.465]:    [ts2phc.0.config]   nmea delay: 88403525 ns
 // ts2phc[82674.465]:    [ts2phc.0.config]   ens2f1 extts index 0 at 1673031129.000000000 corr 0 src 1673031129.911642976 diff 0
@@ -105,26 +106,26 @@ func parseOffsetMetric(line string) (events.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Ts2PhcEvent{
-		State:     ptp.StateFromPtp4l(fields[metricStateField]),
+	return &Ts2PhcOffset{
+		State:     ptp.StateFromString(fields[metricStateField]),
 		Interface: fields[metricInterfaceField], // TODO look up interface by clock device
 		Offset:    offset,
 		Freq:      freq,
 	}, nil
 }
 
-type Ts2PhcEvent struct {
+type Ts2PhcOffset struct {
 	State     ptp.State
 	Offset    int64
 	Interface string
 	Freq      int64
 }
 
-func (e *Ts2PhcEvent) SubType() events.EventType {
-	return events.Ts2phcMetric
+func (e *Ts2PhcOffset) SubType() events.EventType {
+	return events.Ts2phcOffset
 }
 
-func (e *Ts2PhcEvent) Marshal() ([]byte, error) {
+func (e *Ts2PhcOffset) Marshal() ([]byte, error) {
 	return json.Marshal(struct {
 		State     string `json:"state"`
 		Offset    int64  `json:"offset"`
@@ -138,7 +139,7 @@ func (e *Ts2PhcEvent) Marshal() ([]byte, error) {
 	})
 }
 
-func (e *Ts2PhcEvent) Value() map[string]any {
+func (e *Ts2PhcOffset) Value() map[string]any {
 	return map[string]any{
 		"state":     e.State,
 		"offset":    e.Offset,

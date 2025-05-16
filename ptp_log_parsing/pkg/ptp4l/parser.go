@@ -2,73 +2,33 @@ package ptp4l
 
 import (
 	"encoding/json"
-	"fmt"
+	"ptplogparser/pkg/consts"
 	"ptplogparser/pkg/events"
+	"ptplogparser/pkg/parser"
 	"ptplogparser/pkg/process"
 	"ptplogparser/pkg/ptp"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
-type Ptp4lParser struct {
-	process process.Process
-	inChan  <-chan string
-	outChan chan<- events.Event
-	quit    chan struct{}
-	wg      sync.WaitGroup
-}
+const PTP4LName = "ptp4l"
 
-func NewParser(inChan <-chan string, outchan chan<- events.Event, process process.Process) *Ptp4lParser {
-	return &Ptp4lParser{
-		process: process,
-		inChan:  inChan,
-		outChan: outchan,
-		quit:    make(chan struct{}),
-	}
-}
-
-func (p *Ptp4lParser) Start() {
-	go p.parse()
-}
-
-func (p *Ptp4lParser) Stop(wait bool) {
-	p.quit <- struct{}{}
-	p.process.Stop()
-	if wait {
-		p.wg.Wait()
-	}
-}
-
-func (p *Ptp4lParser) parse() {
-	p.wg.Add(1)
-	defer p.wg.Done()
-	for {
-		select {
-		case <-p.quit:
-			return
-		default:
-			time.Sleep(time.Nanosecond)
-		case line := <-p.inChan:
-			event, err, triedToParse := parseLine(line)
-			if !triedToParse {
-				continue
-			}
-
-			if err != nil {
-				fmt.Println(fmt.Errorf("failed to parse ptp4l line: %s", err))
-			}
-			p.outChan <- event
-		}
-	}
+func NewParser(inChan <-chan string, outchan chan<- events.Event, process process.Process) parser.Parser {
+	return parser.NewParser(
+		PTP4LName,
+		inChan,
+		outchan,
+		process,
+		parseLine,
+	)
 }
 
 const (
-	metricOffsetField = 5
-	metricStateField  = 6
-	metricFreqField   = 8
-	metricDelayField  = 11
+	metricInterfaceField = 3
+	metricOffsetField    = 5
+	metricStateField     = 6
+	metricFreqField      = 8
+	metricDelayField     = 11
 )
 
 var (
@@ -104,48 +64,48 @@ func parseMetricLine(fields []string) (events.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Ptp4lEvent{
-		State: ptp.StateFromPtp4l(fields[metricStateField]),
-		// Interface: fields[interfaceField],
+	return &Ptp4lOffsetEvent{
+		State:     ptp.StateFromString(fields[metricStateField]),
+		Interface: fields[metricInterfaceField],
 		Offset:    offset,
 		Freq:      freq,
 		PathDelay: delay,
 	}, nil
 }
 
-type Ptp4lEvent struct {
-	State  ptp.State
-	Offset int64
-	// Interface string
+type Ptp4lOffsetEvent struct {
+	State     ptp.State
+	Offset    int64
+	Interface string
 	Freq      int64
 	PathDelay int64
 }
 
-func (e *Ptp4lEvent) SubType() events.EventType {
-	return events.PTPMeteric
+func (e *Ptp4lOffsetEvent) SubType() events.EventType {
+	return events.Ptp4lOffsetEvent
 }
 
-func (e *Ptp4lEvent) Marshal() ([]byte, error) {
+func (e *Ptp4lOffsetEvent) Marshal() ([]byte, error) {
 	return json.Marshal(struct {
-		State  string `json:"state"`
-		Offset int64  `json:"offset"`
-		// Interface string `json:"interface"`
-		Freq      int64 `json:"freq"`
-		PathDelay int64 `json:"pathDelay"`
+		State     string `json:"state"`
+		Offset    int64  `json:"offset"`
+		Interface string `json:"interface"`
+		Freq      int64  `json:"freq"`
+		PathDelay int64  `json:"pathDelay"`
 	}{
-		State:  e.State.String(),
-		Offset: e.Offset,
-		// Interface: e.Interface,
+		State:     e.State.String(),
+		Offset:    e.Offset,
+		Interface: e.Interface,
 		Freq:      e.Freq,
 		PathDelay: e.PathDelay,
 	})
 }
 
-func (e *Ptp4lEvent) Value() map[string]any {
+func (e *Ptp4lOffsetEvent) Value() map[string]any {
 	return map[string]any{
-		"state":  e.State,
-		"offset": e.Offset,
-		// "interface": e.Interface,
+		"state":     e.State,
+		"offset":    e.Offset,
+		"interface": e.Interface,
 		"freq":      e.Freq,
 		"pathdelay": e.PathDelay,
 	}
@@ -198,9 +158,9 @@ func (e *Ptp4lRoleEvent) Marshal() ([]byte, error) {
 
 func (e *Ptp4lRoleEvent) Value() map[string]any {
 	return map[string]any{
-		"interface":    e.Interface,
-		"role":         e.Role.String(),
-		"previousRole": e.PreviousRole.String(),
-		"action":       e.Action.String(),
+		consts.InterfaceKey:    e.Interface,
+		consts.RoleKey:         e.Role.String(),
+		consts.PreviousRoleKey: e.PreviousRole.String(),
+		consts.ActionKey:       e.Action.String(),
 	}
 }

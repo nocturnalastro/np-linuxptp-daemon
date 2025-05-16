@@ -11,6 +11,13 @@ import (
 	"time"
 )
 
+const (
+	allowedMissed     = 3
+	pollInterval      = 1 * time.Second
+	popTimeout        = 1 * time.Microsecond
+	timeLsResultLines = 4
+)
+
 type InstantValues struct {
 	Offset int64
 	GPSFix int8
@@ -55,7 +62,7 @@ func (v *InstantValues) SetTimeLs(timeLs *TimeLs) {
 }
 
 type UbxParser struct {
-	process *UbxProcess
+	process process.Process
 	inChan  <-chan string
 	outChan chan<- events.Event
 	quit    chan bool
@@ -65,7 +72,7 @@ type UbxParser struct {
 	wg          sync.WaitGroup
 }
 
-func NewParser(inChan <-chan string, outChan chan<- events.Event, process *process.Process) *UbxParser {
+func NewParser(inChan <-chan string, outChan chan<- events.Event, process process.Process) *UbxParser {
 	return &UbxParser{
 		inChan:  inChan,
 		outChan: outChan,
@@ -144,7 +151,7 @@ func (p *UbxParser) processEvents() {
 	p.wg.Add(1)
 	defer p.wg.Done()
 
-	ticker := time.NewTicker(PollInterval)
+	ticker := time.NewTicker(pollInterval)
 	missedTicks := 0
 	for {
 		select {

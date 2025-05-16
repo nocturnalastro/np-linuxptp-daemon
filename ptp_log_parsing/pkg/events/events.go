@@ -6,8 +6,9 @@ const (
 	GNSSMetric EventType = iota
 	PTPMeteric
 	PortRole
+	Ptp4lOffsetEvent
 	Phc2SysMetric
-	Ts2phcMetric
+	Ts2phcOffset
 )
 
 type Event interface {

@@ -31,8 +31,7 @@ func main() {
 	}()
 
 	lines := make(chan string, 100)
-	process := ublox.NewProcess(lines)
-	parser := ublox.NewParser(lines, events, &process)
+	parser := ublox.NewParser(lines, events, ublox.NewProcess(lines))
 
 	parser.Start()
 	time.Sleep(5 * time.Minute)
