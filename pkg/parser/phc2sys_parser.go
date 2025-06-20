@@ -27,7 +27,7 @@ var (
 			`\s+CLOCK_REALTIME` +
 			`\s+(?P<source>phc|sys)` +
 			`\s+offset\s+(?P<offset>\d+)` +
-			`\s+(?P<clock_state>s\d)` +
+			`\s+(?P<servo_state>s\d)` +
 			`\s+freq\s+(?P<freq_adj>[-+]\d+)` +
 			`\s*(?:delay\s+(?P<delay>\d+))?$`,
 	)
@@ -39,7 +39,7 @@ type phc2sysParsed struct {
 	MaxOffset  *float64
 	FreqAdj    *float64
 	Delay      *float64
-	ClockState string
+	ServoState string
 	Source     string
 }
 
@@ -84,8 +84,8 @@ func (p *phc2sysParsed) Populate(line string, matched, feilds []string) error {
 				return err
 			}
 			p.Delay = &delay
-		case "clock_state":
-			p.ClockState = matched[i]
+		case "servo_state":
+			p.ServoState = matched[i]
 		case "source":
 			p.Source = matched[i]
 		}
@@ -169,7 +169,7 @@ func extractRegularPhc2Sys(parsed *phc2sysParsed) (*Metrics, error) {
 	if parsed.Source == "" {
 		return nil, errors.New("failed to find source")
 	}
-	clockState := parseClockState(parsed.ClockState)
+	clockState := clockStateFromServo(parsed.ServoState)
 
 	return &Metrics{
 		Iface:      constants.ClockRealTime,
