@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"cmp"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -43,6 +44,7 @@ const (
 	PTP4L_CONF_FILE_PATH            = "/etc/ptp4l.conf"
 	PTP4L_CONF_DIR                  = "/ptp4l-conf"
 	connectionRetryInterval         = 1 * time.Second
+	connectionRetryLimit            = 120
 	eventSocket                     = "/cloud-native/events.sock"
 	ClockClassChangeIndicator       = "selected best master clock"
 	GPSDDefaultGNSSSerialPort       = "/dev/gnss0"
@@ -296,8 +298,30 @@ func New(
 	}
 }
 
+func waitForCloudEventProxy(socketPath string, retries int, delay time.Duration) error {
+	log.Printf("Waiting for cloud-event-proxy to be ready at socket: %s", socketPath)
+	for i := 0; i < retries; i++ {
+		conn, err := net.Dial("unix", eventSocket)
+		if err == nil {
+			conn.Close()
+			log.Println("cloud-event-proxy is ready.")
+			return nil
+		}
+		log.Printf("Attempt %d: cloud-event-proxy not ready, retrying in %s...\n", i+1, delay)
+		time.Sleep(delay)
+	}
+	return fmt.Errorf("cloud-event-proxy did not become ready after %d attempts", retries)
+}
+
 // Run in a for loop to listen for any LinuxPTPConfUpdate changes
 func (dn *Daemon) Run() {
+	if dn.stdoutToSocket {
+		err := waitForCloudEventProxy(eventSocket, connectionRetryLimit, connectionRetryInterval)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	go dn.processManager.ptpEventHandler.ProcessEvents()
 	tickerPmc := time.NewTicker(time.Second * time.Duration(dn.pmcPollInterval))
 	defer tickerPmc.Stop()
