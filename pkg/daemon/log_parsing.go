@@ -122,6 +122,14 @@ func processParsedMetrics(process *ptpProcess, ptpMetrics *parser.Metrics) {
 		if ptpMetrics.Source == "master" && process.dn != nil {
 			process.dn.HandleDelayedPhc2sysStartup(process.name, ptpMetrics.Offset, process.nodeProfile.Name)
 		}
+		if process.tBCAttributes.trIfaceName != "" {
+			process.sendPtp4lOffsetEvent(ptpMetrics.Offset)
+			process.checkOffsetFilterAndTransition(ptpMetrics.Offset, func() {
+				process.dn.pluginManager.AfterRunPTPCommand(&process.nodeProfile, "tbc-ho-exit")
+				process.lastTransitionResult = event.PTP_LOCKED
+				process.sendPtp4lEvent()
+			})
+		}
 	case ts2phcProcessName:
 		if process.dn != nil {
 			process.dn.HandleDelayedPhc2sysStartup(process.name, ptpMetrics.Offset, process.nodeProfile.Name)

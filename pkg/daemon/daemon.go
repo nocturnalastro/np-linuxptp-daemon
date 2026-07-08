@@ -41,23 +41,25 @@ import (
 )
 
 const (
-	PtpNamespace                    = "openshift-ptp"
-	PTP4L_CONF_FILE_PATH            = "/etc/ptp4l.conf"
-	PTP4L_CONF_DIR                  = "/ptp4l-conf"
-	connectionRetryInterval         = 1 * time.Second
-	eventSocket                     = "/cloud-native/events.sock"
-	ClockClassChangeIndicator       = "selected best master clock"
-	GPSDDefaultGNSSSerialPort       = "/dev/gnss0"
-	NMEASourceDisabledIndicator     = "nmea source timed out"
-	NMEASourceDisabledIndicator2    = "source ts not valid"
-	InvalidMasterTimestampIndicator = "ignoring invalid master time stamp"
-	PTP_HA_IDENTIFIER               = "haProfiles"
-	HAInDomainIndicator             = "as domain source clock"
-	HAOutOfDomainIndicator          = "as out-of-domain source"
-	MessageTagSuffixSeperator       = ":"
-	TBC                             = "T-BC"
-	TGM                             = "T-GM"
-	ChronydSocketPath               = "/tmp/chrony/chronyd.sock"
+	PtpNamespace                      = "openshift-ptp"
+	PTP4L_CONF_FILE_PATH              = "/etc/ptp4l.conf"
+	PTP4L_CONF_DIR                    = "/ptp4l-conf"
+	connectionRetryInterval           = 1 * time.Second
+	eventSocket                       = "/cloud-native/events.sock"
+	ClockClassChangeIndicator         = "selected best master clock"
+	GPSDDefaultGNSSSerialPort         = "/dev/gnss0"
+	NMEASourceDisabledIndicator       = "nmea source timed out"
+	NMEASourceDisabledIndicator2      = "source ts not valid"
+	InvalidMasterTimestampIndicator   = "ignoring invalid master time stamp"
+	PTP_HA_IDENTIFIER                 = "haProfiles"
+	HAInDomainIndicator               = "as domain source clock"
+	HAOutOfDomainIndicator            = "as out-of-domain source"
+	MessageTagSuffixSeperator         = ":"
+	TBC                               = "T-BC"
+	TGM                               = "T-GM"
+	offsetFilterSize                  = 64
+	defaultPtp4lOffsetEventWindowSize = 16
+	ChronydSocketPath                 = "/tmp/chrony/chronyd.sock"
 )
 
 var (
@@ -216,9 +218,16 @@ func (p *ProcessManager) EmitClockClassLogs() {
 }
 
 type tBCProcessAttributes struct {
-	controlledPortsConfigFile string
+	ttPortsConfigFile string
+	trPortsConfigFile string
 	// Time receiver interface name for T-BC clock monitoring
-	trIfaceName string
+	trIfaceName        string
+	lastReportedState  event.PTPState
+	lastAppliedState   event.PTPState
+	offsetFilter       *utils.Window
+	offsetThreshold    float64
+	offsetEventWindow  *utils.Window
+	lastOffsetEventSec int64
 }
 
 type ptpProcess struct {
@@ -771,24 +780,29 @@ func (dn *Daemon) applyNodePtpProfile(runID int, nodeProfile *ptpv1.PtpProfile) 
 		args := strings.Split(cmdLine, " ")
 		cmd = exec.Command(args[0], args[1:]...)
 		dprocess := ptpProcess{
-			name:                 pProcess,
-			ifaces:               ifaces,
-			processConfigPath:    configPath,
-			processSocketPath:    socketPath,
-			configName:           configFile,
-			messageTag:           messageTag,
-			exitCh:               make(chan bool),
-			stopped:              true,
-			logFilters:           logfilter.GetLogFilters(pProcess, messageTag, (*nodeProfile).PtpSettings),
-			cmd:                  cmd,
-			depProcess:           []process{},
-			nodeProfile:          *nodeProfile,
-			clockType:            clockType,
-			ptpClockThreshold:    getPTPThreshold(nodeProfile),
-			haProfile:            haProfile,
-			syncERelations:       relations,
-			logParser:            getParser(pProcess),
-			tBCAttributes:        tBCProcessAttributes{controlledPortsConfigFile: controlledConfigFile},
+			name:              pProcess,
+			ifaces:            ifaces,
+			processConfigPath: configPath,
+			processSocketPath: socketPath,
+			configName:        configFile,
+			messageTag:        messageTag,
+			exitCh:            make(chan bool),
+			stopped:           true,
+			logFilters:        logfilter.GetLogFilters(pProcess, messageTag, (*nodeProfile).PtpSettings),
+			cmd:               cmd,
+			depProcess:        []process{},
+			nodeProfile:       *nodeProfile,
+			clockType:         clockType,
+			ptpClockThreshold: getPTPThreshold(nodeProfile),
+			haProfile:         haProfile,
+			syncERelations:    relations,
+			logParser:         getParser(pProcess),
+			tBCAttributes: tBCProcessAttributes{
+				ttPortsConfigFile: controlledConfigFile,
+				trPortsConfigFile: configFile,
+				lastReportedState: event.PTP_NOTSET,
+				lastAppliedState:  event.PTP_NOTSET,
+			},
 			lastTransitionResult: event.PTP_NOTSET,
 			dn:                   dn,
 		}
@@ -796,6 +810,24 @@ func (dn *Daemon) applyNodePtpProfile(runID int, nodeProfile *ptpv1.PtpProfile) 
 		if pProcess == ptp4lProcessName {
 			if port, ok := (*nodeProfile).PtpSettings["upstreamPort"]; ok && clockType == event.BC {
 				dprocess.tBCAttributes.trIfaceName = port
+				if sInSyncConditionTh, thOk := (*nodeProfile).PtpSettings["inSyncConditionThreshold"]; thOk {
+					if th, parseErr := strconv.ParseFloat(sInSyncConditionTh, 64); parseErr == nil {
+						dprocess.tBCAttributes.offsetThreshold = th
+					} else {
+						dprocess.tBCAttributes.offsetThreshold = float64(getPTPThreshold(nodeProfile).MaxOffsetThreshold)
+					}
+				} else {
+					dprocess.tBCAttributes.offsetThreshold = float64(getPTPThreshold(nodeProfile).MaxOffsetThreshold)
+				}
+				offsetEventWindowSize := defaultPtp4lOffsetEventWindowSize
+				if sWindowSize, wsOk := (*nodeProfile).PtpSettings["ptp4lOffsetEventWindowSize"]; wsOk {
+					if ws, parseErr := strconv.Atoi(sWindowSize); parseErr == nil && ws > 0 {
+						offsetEventWindowSize = ws
+					} else {
+						glog.Warningf("invalid ptp4lOffsetEventWindowSize %q, using default %d", sWindowSize, defaultPtp4lOffsetEventWindowSize)
+					}
+				}
+				dprocess.tBCAttributes.offsetEventWindow = utils.NewWindow(offsetEventWindowSize)
 			}
 		}
 		// TODO HARDWARE PLUGIN for e810
@@ -1040,15 +1072,17 @@ func (p *ptpProcess) updateClockClass(c *net.Conn) {
 func (p *ptpProcess) tBCTransitionCheck(output string, pm *plugin.PluginManager) {
 	if strings.Contains(output, p.tBCAttributes.trIfaceName) {
 		if strings.Contains(output, "to SLAVE on MASTER_CLOCK_SELECTED") {
-			glog.Info("T-BC MOVE TO NORMAL")
-			pm.AfterRunPTPCommand(&p.nodeProfile, "tbc-ho-exit")
-			p.lastTransitionResult = event.PTP_LOCKED
-			p.sendPtp4lEvent()
+			glog.Info("T-BC: ptp4l acquired SLAVE, starting offset filter")
+			p.tBCAttributes.lastReportedState = event.PTP_LOCKED
+			p.tBCAttributes.offsetFilter = utils.NewWindow(offsetFilterSize)
 		} else if strings.Contains(output, "to MASTER on ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES") ||
 			strings.Contains(output, "SLAVE to") {
 			glog.Info("T-BC MOVE TO HOLDOVER")
 			pm.AfterRunPTPCommand(&p.nodeProfile, "tbc-ho-entry")
 			p.lastTransitionResult = event.PTP_FREERUN
+			p.tBCAttributes.lastReportedState = event.PTP_FREERUN
+			p.tBCAttributes.lastAppliedState = event.PTP_HOLDOVER
+			p.tBCAttributes.offsetFilter = nil
 			p.sendPtp4lEvent()
 		}
 	}
@@ -1870,6 +1904,63 @@ func (p *ptpProcess) getPTPClockID() (string, error) {
 		id&0xffffff0000000000>>40, id&0xffffff), nil
 }
 
+// checkOffsetFilterAndTransition inserts the current ptp4l offset into the
+// offset filter window and, once the window is full with a mean below threshold,
+// triggers the LOCKED transition via the provided action callback.
+func (p *ptpProcess) checkOffsetFilterAndTransition(offset float64, transitionAction func()) {
+	if p.configName != p.tBCAttributes.trPortsConfigFile || p.tBCAttributes.offsetFilter == nil {
+		return
+	}
+
+	p.tBCAttributes.offsetFilter.Insert(math.Abs(offset))
+	if p.tBCAttributes.lastReportedState == event.PTP_LOCKED &&
+		p.tBCAttributes.lastAppliedState != event.PTP_LOCKED {
+		if p.tBCAttributes.offsetFilter.IsFull() {
+			tempOffset := p.tBCAttributes.offsetFilter.Mean()
+			glog.Infof("Filtered Offset: %f, threshold %f", tempOffset, p.tBCAttributes.offsetThreshold)
+			if tempOffset < p.tBCAttributes.offsetThreshold {
+				glog.Infof("T-BC MOVE TO NORMAL STATE")
+				p.tBCAttributes.lastAppliedState = event.PTP_LOCKED
+				transitionAction()
+			}
+		}
+	}
+}
+
+// sendPtp4lOffsetEvent inserts the current ptp4l offset into a sliding window and,
+// once per second, sends the window average to the T-BC state machine via the event
+// channel. This gives event_tbc.go visibility into ptp4l-level offsets for
+// freeRunCondition and getLargestOffset calculations.
+func (p *ptpProcess) sendPtp4lOffsetEvent(offset float64) {
+	if p.configName != p.tBCAttributes.trPortsConfigFile || p.tBCAttributes.offsetEventWindow == nil {
+		return
+	}
+	p.tBCAttributes.offsetEventWindow.Insert(offset)
+
+	nowSec := time.Now().Unix()
+	if nowSec == p.tBCAttributes.lastOffsetEventSec {
+		return
+	}
+	p.tBCAttributes.lastOffsetEventSec = nowSec
+
+	avgOffset := int64(p.tBCAttributes.offsetEventWindow.Mean())
+	glog.Infof("PTP4l offset event: %d", avgOffset)
+	select {
+	case p.eventCh <- event.EventChannel{
+		ProcessName: event.PTP4l,
+		State:       p.tBCAttributes.lastReportedState,
+		CfgName:     p.configName,
+		IFace:       p.tBCAttributes.trIfaceName,
+		ClockType:   p.clockType,
+		Time:        time.Now().UnixMilli(),
+		Values: map[event.ValueType]any{
+			event.OFFSET: avgOffset,
+		},
+	}:
+	default:
+	}
+}
+
 func (p *ptpProcess) sendPtp4lEvent() {
 	clockID, err := p.getPTPClockID()
 	if err != nil {
@@ -1889,7 +1980,7 @@ func (p *ptpProcess) sendPtp4lEvent() {
 		SourceLost:  p.lastTransitionResult != event.PTP_LOCKED,
 		OutOfSpec:   false,
 		Values: map[event.ValueType]any{
-			event.ControlledPortsConfig: p.tBCAttributes.controlledPortsConfigFile,
+			event.ControlledPortsConfig: p.tBCAttributes.ttPortsConfigFile,
 			event.ClockIDKey:            clockID,
 		},
 	}:
