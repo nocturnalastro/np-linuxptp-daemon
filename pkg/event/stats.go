@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/golang/glog"
+	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -16,6 +17,7 @@ type Data struct {
 	Details     DDetails    // array of iface and  offset
 	State       PTPState    // have the worst state here
 	logData     string      // iface that is connected to GNSS
+	window      utils.Window
 }
 
 // DataMetrics ...
@@ -87,9 +89,20 @@ func (d *Data) AddEvent(event EventChannel) {
 				dd.ClockType = event.ClockType
 				dd.time = event.Time
 				dd.logData = event.GetLogData()
+				if event.SourceLost {
+					for _, other := range d.Details {
+						if other.State == PTP_LOCKED {
+							other.sourceLost = true
+						}
+					}
+				}
 				off, fnd := event.Values[OFFSET]
 				if fnd {
-					dd.Offset = off.(int64)
+					offset := off.(int64)
+					dd.Offset = offset
+					if offset != FaultyPhaseOffset {
+						d.window.Insert(float64(offset))
+					}
 				}
 
 			} else {

@@ -27,6 +27,7 @@ type ValueType string
 const (
 	PTPNamespace = "openshift"
 	PTPSubsystem = "ptp"
+	WindowSize   = 10
 )
 
 // nolint:all
@@ -187,6 +188,7 @@ type EventHandler struct {
 	ReduceLog          bool // reduce logs for every announce
 	LeadingClockData   *LeadingClockParams
 	portRole           map[string]map[string]*PortRoleEvent
+	downstreamCancel   map[string]context.CancelFunc
 }
 
 // getConn returns the current event socket connection under lock.
@@ -257,7 +259,8 @@ func Init(nodeName string, stdOutToSocket bool, socketName string, processChanne
 			downstreamTimeProperties: &protocol.TimePropertiesDS{},
 			downstreamParentDataSet:  &protocol.ParentDataSet{},
 		},
-		portRole: map[string]map[string]*PortRoleEvent{},
+		portRole:         map[string]map[string]*PortRoleEvent{},
+		downstreamCancel: map[string]context.CancelFunc{},
 	}
 
 	StateRegisterer = NewStateNotifier()
@@ -1223,6 +1226,7 @@ func (e *EventHandler) GetData(cfgName string, processName EventSource) *Data {
 	d := &Data{
 		ProcessName: processName,
 		State:       PTP_UNKNOWN,
+		window:      *utils.NewWindow(WindowSize),
 	}
 	e.data[cfgName] = append(e.data[cfgName], d)
 	return d
