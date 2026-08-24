@@ -230,26 +230,18 @@ spec:
     clockType: T-GM
     clockChain:
       structure:
-        - name: nac
+        - name: leader
           hardwareSpecificDefinitions: dell/XR8720t
           dpll:
             holdoverParameters:
               maxInSpecOffset: 14400
               localMaxHoldoverOffset: 1500
               localHoldoverTimeout: 1500
-        - name: cf1
-          hardwareSpecificDefinitions: intel/e830
-          dpll:
-            networkInterface: enp108s0f0
-        - name: cf2
-          hardwareSpecificDefinitions: intel/e830
-          dpll:
-            networkInterface: enp110s0f0
       behavior:
         sources:
           - name: GNSS
             sourceType: gnss
-            subsystem: nac
+            subsystem: leader
             gnssConfig:
               init:
                 antennaVoltage: true
