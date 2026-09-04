@@ -715,32 +715,28 @@ func (c *TBC) SystemClockUpdate(osClockState event.PTPState) {
 }
 
 func (c *TBC) processSyncE(ev event.Event) {
-	data, ok := ev.Data.(*event.PTPData)
+	data, ok := ev.Data.(*event.SyncEData)
 	if !ok || data == nil {
 		return
 	}
 	profile := strings.Replace(c.cfgName, "ts2phc", "ptp4l", 1)
 
-	if eecState, fnd := data.Values[event.EEC_STATE]; fnd {
-		if s, isStr := eecState.(string); isStr && s != "" {
-			c.sendIPC(ipc.Message{
-				Type:    ipc.TypeSyncEState,
-				Profile: profile,
-				IFace:   ev.IFace,
-				Values:  ipc.SyncEStateValue{State: s},
-			})
-		}
+	if data.EECState != "" {
+		c.sendIPC(ipc.Message{
+			Type:    ipc.TypeSyncEState,
+			Profile: profile,
+			IFace:   ev.IFace,
+			Values:  ipc.SyncEStateValue{State: data.EECState},
+		})
 	}
 
-	qlVal, hasQL := data.Values[event.QL]
-	extQLVal, hasExtQL := data.Values[event.EXT_QL]
-	if hasQL || hasExtQL {
+	if data.QL != nil || data.ExtQL != nil {
 		ql, extQL := 0, 0
-		if hasQL {
-			ql = int(qlVal.(byte))
+		if data.QL != nil {
+			ql = int(*data.QL)
 		}
-		if hasExtQL {
-			extQL = int(extQLVal.(byte))
+		if data.ExtQL != nil {
+			extQL = int(*data.ExtQL)
 		}
 		c.sendIPC(ipc.Message{
 			Type:    ipc.TypeSyncEClockQuality,
@@ -752,46 +748,35 @@ func (c *TBC) processSyncE(ev event.Event) {
 }
 
 func (c *TBC) updateLeadingClockData(ev event.Event) {
-	ptp, ok := ev.Data.(*event.PTPData)
-	if !ok {
-		return
-	}
-	if ev.Source == event.PTP4lProcessName {
-		if v, fnd := ptp.Values[event.ControlledPortsConfig]; fnd {
-			if s, isStr := v.(string); isStr && s != "" {
-				c.leadingClockData.controlledPortsConfig = s
-			}
+	switch data := ev.Data.(type) {
+	case *event.StateData:
+		if ev.Source != event.PTP4lProcessName {
+			return
 		}
-		if v, fnd := ptp.Values[event.ClockIDKey]; fnd {
-			if s, isStr := v.(string); isStr && s != "" {
-				c.leadingClockData.clockID = s
-			}
+		if data.ControlledPortsConfig != "" {
+			c.leadingClockData.controlledPortsConfig = data.ControlledPortsConfig
 		}
-	} else if ev.Source == event.DPLL {
-		if v, fnd := ptp.Values[event.LeadingSource]; fnd {
-			if b, isBool := v.(bool); isBool && b {
-				c.leadingClockData.leadingInterface = ev.IFace
-			}
+		if data.ClockID != "" {
+			c.leadingClockData.clockID = data.ClockID
 		}
-		if v, fnd := ptp.Values[event.InSyncConditionThreshold]; fnd {
-			if u, isU64 := v.(uint64); isU64 && u != 0 {
-				c.leadingClockData.inSyncConditionThreshold = int(u)
-			}
+	case *event.DPLLData:
+		if ev.Source != event.DPLL {
+			return
 		}
-		if v, fnd := ptp.Values[event.InSyncConditionTimes]; fnd {
-			if u, isU64 := v.(uint64); isU64 && u != 0 {
-				c.leadingClockData.inSyncConditionTimes = int(u)
-			}
+		if data.LeadingSource {
+			c.leadingClockData.leadingInterface = ev.IFace
 		}
-		if v, fnd := ptp.Values[event.ToFreeRunThreshold]; fnd {
-			if u, isU64 := v.(uint64); isU64 && u != 0 {
-				c.leadingClockData.toFreeRunThreshold = int(u)
-			}
+		if data.InSyncConditionThreshold != 0 {
+			c.leadingClockData.inSyncConditionThreshold = int(data.InSyncConditionThreshold)
 		}
-		if v, fnd := ptp.Values[event.MaxInSpecOffset]; fnd {
-			if u, isU64 := v.(uint64); isU64 && u != 0 {
-				c.leadingClockData.MaxInSpecOffset = u
-			}
+		if data.InSyncConditionTimes != 0 {
+			c.leadingClockData.inSyncConditionTimes = int(data.InSyncConditionTimes)
+		}
+		if data.ToFreeRunThreshold != 0 {
+			c.leadingClockData.toFreeRunThreshold = int(data.ToFreeRunThreshold)
+		}
+		if data.MaxInSpecOffset != 0 {
+			c.leadingClockData.MaxInSpecOffset = data.MaxInSpecOffset
 		}
 	}
 }

@@ -65,9 +65,9 @@ func TestClockManager_GetDataAndPTPState(t *testing.T) {
 		Source:  event.TS2PHC,
 		CfgName: "ts2phc.0.config",
 		IFace:   testClockmgrETH0,
-		Data: &event.PTPData{
+		Data: &event.OffsetData{
 			State:  event.PTP_LOCKED,
-			Values: map[event.ValueType]interface{}{event.OFFSET: int64(100)},
+			Offset: 100,
 		},
 	}
 	d.AddEvent(ev)
@@ -120,13 +120,13 @@ func TestClockManager_GetWindowsPrefersMatchingProcess(t *testing.T) {
 		Source:  event.PTP4l,
 		CfgName: testClockmgrPtp4lConfig,
 		IFace:   testClockmgrETH0,
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(10)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 10},
 	}
 	ts2phcEv := event.Event{
 		Source:  event.TS2PHC,
 		CfgName: "ts2phc.0.config",
 		IFace:   testClockmgrETH0,
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(99)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 99},
 	}
 	// AddEvent only records the offset window after the iface already exists.
 	cm.GetClock(testClockmgrPtp4lConfig).GetData(event.PTP4l).AddEvent(ptp4lEv)
@@ -151,7 +151,7 @@ func TestClockManager_GetWindowsOmitsMismatchedProcess(t *testing.T) {
 		Source:  event.TS2PHC,
 		CfgName: "ts2phc.0.config",
 		IFace:   testClockmgrETH0,
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(99)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 99},
 	}
 	cm.GetClock("ts2phc.0.config").GetData(event.TS2PHC).AddEvent(ts2phcEv)
 
@@ -169,7 +169,7 @@ func TestClockManager_SetTBCLeadingInterface(t *testing.T) {
 		Source:  event.PTP4l,
 		CfgName: "ptp4l.1.config",
 		IFace:   "ens1f1",
-		Data:    &event.PTPData{State: event.PTP_FREERUN, Values: map[event.ValueType]interface{}{event.OFFSET: int64(49880)}},
+		Data:    &event.OffsetData{State: event.PTP_FREERUN, Offset: 49880},
 	})
 	assert.Equal(t, "ens1f0", state.LeadingIFace)
 }

@@ -196,7 +196,7 @@ func (m *ClockManager) GetUtcOffset() int {
 // a sync_state message per-profile when the overall state changes.
 func (m *ClockManager) handleOSClockEvent(ev event.Event) {
 	prevClockState := m.osClockState
-	ptp, ok := ev.Data.(*event.PTPData)
+	ptp, ok := ev.Data.(*event.OffsetData)
 	if !ok {
 		glog.Warningf("handleOSClockEvent: received unexpected event")
 		return
@@ -207,10 +207,7 @@ func (m *ClockManager) handleOSClockEvent(ev event.Event) {
 	}
 
 	// if the OS clock state changed, emit the event to CEP and also pass it along to each clock
-	var osOffset int64
-	if off, fnd := ptp.Values[event.OFFSET]; fnd {
-		osOffset = off.(int64)
-	}
+	osOffset := ptp.Offset
 	m.sendIPC(ipc.Message{
 		Type:   ipc.TypeOSClockState,
 		IFace:  ev.IFace,
@@ -333,8 +330,24 @@ func (m *ClockManager) updateMetrics(ev event.Event) {
 			event.GPS_STATUS: data.GPSStatus,
 			event.OFFSET:     data.Offset,
 		}
-	case *event.PTPData:
-		processData = data.Values
+	case *event.OffsetData:
+		processData = map[event.ValueType]interface{}{
+			event.OFFSET: data.Offset,
+		}
+		if data.NMEAStatus != nil {
+			processData[event.NMEA_STATUS] = *data.NMEAStatus
+		}
+	case *event.DPLLData:
+		processData = map[event.ValueType]interface{}{}
+		if data.Offset != nil {
+			processData[event.OFFSET] = *data.Offset
+		}
+		if data.PhaseStatus != nil {
+			processData[event.PHASE_STATUS] = *data.PhaseStatus
+		}
+		if data.FrequencyStatus != nil {
+			processData[event.FREQUENCY_STATUS] = *data.FrequencyStatus
+		}
 	default:
 		return
 	}

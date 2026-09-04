@@ -562,11 +562,9 @@ func TestUpdateDownstreamData_Freerun_CallsAnnounceLocalData(t *testing.T) {
 func TestUpdateLeadingClockData_PTP4lProcessName(t *testing.T) {
 	ev := event.Event{
 		Source: event.PTP4lProcessName,
-		Data: &event.PTPData{
-			Values: map[event.ValueType]interface{}{
-				event.ControlledPortsConfig: testConfig,
-				event.ClockIDKey:            "clockID",
-			},
+		Data: &event.StateData{
+			ControlledPortsConfig: testConfig,
+			ClockID:               "clockID",
 		},
 	}
 
@@ -581,14 +579,12 @@ func TestUpdateLeadingClockData_DPLL(t *testing.T) {
 	ev := event.Event{
 		Source: event.DPLL,
 		IFace:  testIface,
-		Data: &event.PTPData{
-			Values: map[event.ValueType]interface{}{
-				event.LeadingSource:            true,
-				event.InSyncConditionThreshold: uint64(100),
-				event.InSyncConditionTimes:     uint64(200),
-				event.ToFreeRunThreshold:       uint64(300),
-				event.MaxInSpecOffset:          uint64(400),
-			},
+		Data: &event.DPLLData{
+			LeadingSource:            true,
+			InSyncConditionThreshold: 100,
+			InSyncConditionTimes:     200,
+			ToFreeRunThreshold:       300,
+			MaxInSpecOffset:          400,
 		},
 	}
 
@@ -806,7 +802,7 @@ func TestAddEvent_SourceLostPropagation(t *testing.T) {
 				Source: event.PTP4l,
 				IFace:  testEno8703,
 				Time:   now,
-				Data:   &event.PTPData{State: event.PTP_FREERUN, SourceLost: true, Values: map[event.ValueType]interface{}{}},
+				Data:   &event.StateData{State: event.PTP_FREERUN, SourceLost: true},
 			},
 			expectedStates: map[string]event.PTPState{
 				testEno8903: event.PTP_LOCKED,
@@ -861,7 +857,7 @@ func TestIsSourceLostBC_StaleDetailFixed(t *testing.T) {
 			Source: event.PTP4l,
 			IFace:  testEno8703,
 			Time:   now,
-			Data:   &event.PTPData{State: event.PTP_FREERUN, SourceLost: true, Values: map[event.ValueType]interface{}{}},
+			Data:   &event.StateData{State: event.PTP_FREERUN, SourceLost: true},
 		})
 
 		assert.False(t, bc.isSourceLostBC(), "stale LOCKED detail on other iface prevents ptpLost")
@@ -935,7 +931,9 @@ func TestProcessSyncE(t *testing.T) {
 		ev := event.Event{
 			Source: event.SYNCE,
 			IFace:  testEns7f0,
-			Data:   &event.PTPData{Values: map[event.ValueType]interface{}{event.EEC_STATE: "EEC_LOCKED"}},
+			Data: &event.SyncEData{
+				EECState: "EEC_LOCKED",
+			},
 		}
 		bc.processSyncE(ev)
 		assert.Len(t, rio.messages, 1)
@@ -951,7 +949,10 @@ func TestProcessSyncE(t *testing.T) {
 		ev := event.Event{
 			Source: event.SYNCE,
 			IFace:  testEns7f0,
-			Data:   &event.PTPData{Values: map[event.ValueType]interface{}{event.QL: byte(4), event.EXT_QL: byte(0xFF)}},
+			Data: &event.SyncEData{
+				QL:    event.BytePtr(4),
+				ExtQL: event.BytePtr(0xFF),
+			},
 		}
 		bc.processSyncE(ev)
 		assert.Len(t, rio.messages, 1)
@@ -1060,10 +1061,10 @@ func makeTBCEvent(process event.EventSource, state event.PTPState, offset int64,
 		ClockType:  event.BC,
 		Time:       time.Now().UnixMilli(),
 		WriteToLog: true,
-		Data: &event.PTPData{
+		Data: &event.OffsetData{
 			State:      state,
+			Offset:     offset,
 			SourceLost: sourceLost,
-			Values:     map[event.ValueType]interface{}{event.OFFSET: int64(offset)},
 		},
 	}
 }

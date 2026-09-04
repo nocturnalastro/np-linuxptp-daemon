@@ -27,7 +27,7 @@ func TestBCClock_AddEvent_StateTransitions(t *testing.T) {
 		bc, rio := newTestBCClock()
 		cs := bc.AddEvent(event.Event{
 			IFace: testEns7f0,
-			Data:  &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{}},
+			Data:  &event.OffsetData{State: event.PTP_LOCKED},
 		})
 		assert.Equal(t, event.PTP_LOCKED, cs.State)
 		require.Len(t, rio.messages, 1)
@@ -42,7 +42,7 @@ func TestBCClock_AddEvent_StateTransitions(t *testing.T) {
 		bc.syncState = event.PTP_LOCKED
 		cs := bc.AddEvent(event.Event{
 			IFace: testEns7f0,
-			Data:  &event.PTPData{State: event.PTP_FREERUN, Values: map[event.ValueType]interface{}{}},
+			Data:  &event.OffsetData{State: event.PTP_FREERUN},
 		})
 		assert.Equal(t, event.PTP_FREERUN, cs.State)
 		require.Len(t, rio.messages, 1)
@@ -54,7 +54,7 @@ func TestBCClock_AddEvent_StateTransitions(t *testing.T) {
 		bc.syncState = event.PTP_LOCKED
 		cs := bc.AddEvent(event.Event{
 			IFace: testEns7f0,
-			Data:  &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{}},
+			Data:  &event.OffsetData{State: event.PTP_LOCKED},
 		})
 		assert.Equal(t, event.PTP_LOCKED, cs.State)
 		assert.Empty(t, rio.messages)
@@ -114,7 +114,7 @@ func TestBCClock_UpdateOSClockState(t *testing.T) {
 func TestBCClock_UpdateClockClass(t *testing.T) {
 	t.Run("change emits clock_class IPC with iface", func(t *testing.T) {
 		bc, rio := newTestBCClock()
-		bc.AddEvent(event.Event{IFace: testEns7f0, Data: &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{}}})
+		bc.AddEvent(event.Event{IFace: testEns7f0, Data: &event.OffsetData{State: event.PTP_LOCKED}})
 		rio.messages = nil // clear ptp_state IPC from addEvent
 		bc.updateClockClass(fbprotocol.ClockClass6)
 		require.Len(t, rio.messages, 1)
@@ -163,7 +163,7 @@ func TestBCClock_ClockType(t *testing.T) {
 		bc.clockType = event.OC
 		cs := bc.AddEvent(event.Event{
 			IFace: testEns7f0,
-			Data:  &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{}},
+			Data:  &event.OffsetData{State: event.PTP_LOCKED},
 		})
 		assert.Equal(t, event.PTP_LOCKED, cs.State)
 		require.Len(t, rio.messages, 1)

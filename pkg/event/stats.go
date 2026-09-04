@@ -43,6 +43,7 @@ type DataDetails struct {
 	SignalSource       EventSource // GNSS PPS
 	SourceLost         bool
 	Offset             int64
+	HasOffset          bool
 	ProcessStatus      int64
 	HasProcessStatus   bool
 	OutOfSpec          bool
@@ -94,6 +95,7 @@ func (d *Data) AddEvent(event Event) {
 	var offset int64
 	var hasOffset bool
 	var outOfSpec, frequencyTraceable bool
+	var leading bool
 
 	if ps, ok := event.Data.(*ProcessStatusData); ok {
 		d.addProcessStatus(event, ps.Status)
@@ -110,15 +112,28 @@ func (d *Data) AddEvent(event Event) {
 		} else {
 			state = PTP_FREERUN
 		}
-	case *PTPData:
+	case *OffsetData:
+		state = data.State
+		sourceLost = data.SourceLost
+		offset = data.Offset
+		hasOffset = true
+	case *DPLLData:
 		state = data.State
 		sourceLost = data.SourceLost
 		outOfSpec = data.OutOfSpec
 		frequencyTraceable = data.FrequencyTraceable
-		if off, fnd := data.Values[OFFSET]; fnd {
-			offset = off.(int64)
+		if data.Offset != nil {
+			offset = *data.Offset
 			hasOffset = true
 		}
+		if data.LeadingSource {
+			leading = true
+		}
+	case *StateData:
+		state = data.State
+		sourceLost = data.SourceLost
+	case *SyncEData:
+		state = data.State
 	}
 
 	for _, dd := range d.Details {
@@ -133,6 +148,7 @@ func (d *Data) AddEvent(event Event) {
 				dd.LogData = event.GetLogData()
 				if hasOffset {
 					dd.Offset = offset
+					dd.HasOffset = true
 					d.Window.Insert(float64(offset))
 				}
 			} else {
@@ -153,12 +169,9 @@ func (d *Data) AddEvent(event Event) {
 		OutOfSpec:          outOfSpec,
 		FrequencyTraceable: frequencyTraceable,
 	}
-	if ptp, ok := event.Data.(*PTPData); ok {
-		l, found := ptp.Values[LeadingSource]
-		if found && l.(bool) {
-			glog.Info(details.IFace, " is set as the leading source ")
-			details.SignalSource = PTP4l
-		}
+	if leading {
+		glog.Info(details.IFace, " is set as the leading source ")
+		details.SignalSource = PTP4l
 	}
 	d.LogData = details.LogData
 	d.Details = append(d.Details, details)
@@ -214,6 +227,8 @@ func (dd *DataDetails) String() string {
 	switch dd.State {
 	case PTP_FREERUN, PTP_HOLDOVER, PTP_LOCKED:
 		parts = append(parts, "state="+string(dd.State))
+	}
+	if dd.HasOffset {
 		parts = append(parts, "offset="+strconv.FormatInt(dd.Offset, 10))
 	}
 	if dd.SourceLost {
@@ -263,12 +278,12 @@ func (d *Data) Summary() string {
 			stateTime = dd.Time
 			haveState = true
 		}
-		if ptpStatePopulated(dd.State) && (!haveOffset || dd.Time >= offsetTime) {
+		if dd.HasOffset && (!haveOffset || dd.Time >= offsetTime) {
 			offset = dd.Offset
 			offsetTime = dd.Time
 			haveOffset = true
 		}
-		if (ptpStatePopulated(dd.State) || dd.Offset != 0) && (!haveSourceLost || dd.Time >= sourceLostTime) {
+		if (ptpStatePopulated(dd.State) || dd.HasOffset) && (!haveSourceLost || dd.Time >= sourceLostTime) {
 			sourceLost = dd.SourceLost
 			sourceLostTime = dd.Time
 			haveSourceLost = true

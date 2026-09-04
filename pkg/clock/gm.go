@@ -73,10 +73,8 @@ func (c *GM) AddEvent(ev event.Event) SyncState {
 
 	// Zero NMEA status when GM is not locked
 	if clockState.State != event.PTP_LOCKED {
-		if ptp, ok := ev.Data.(*event.PTPData); ok {
-			if _, hasNMEA := ptp.Values[event.NMEA_STATUS]; hasNMEA {
-				ptp.Values[event.NMEA_STATUS] = int64(0)
-			}
+		if od, ok := ev.Data.(*event.OffsetData); ok && od.NMEAStatus != nil {
+			od.NMEAStatus = event.Int64Ptr(0)
 		}
 	}
 
@@ -86,16 +84,16 @@ func (c *GM) AddEvent(ev event.Event) SyncState {
 		switch data := ev.Data.(type) {
 		case *event.GNSSData:
 			debug.UpdateGNSSState(string(dataDetails.State), data.Offset)
-		case *event.PTPData:
-			if ev.Source == event.DPLL {
-				debug.UpdateDPLLState(string(data.State), data.Values[event.OFFSET], ev.IFace)
-				debug.UpdateDPLLState(string(dataDetails.State), 0, debug.OverallDpllKey)
-			} else if ev.Source == event.TS2PHC {
-				var offset int64
-				if off, fnd := data.Values[event.OFFSET]; fnd {
-					offset = off.(int64)
-				}
-				debug.UpdateTs2phcState(string(data.State), offset, ev.IFace)
+		case *event.DPLLData:
+			var offset interface{}
+			if data.Offset != nil {
+				offset = *data.Offset
+			}
+			debug.UpdateDPLLState(string(data.State), offset, ev.IFace)
+			debug.UpdateDPLLState(string(dataDetails.State), 0, debug.OverallDpllKey)
+		case *event.OffsetData:
+			if ev.Source == event.TS2PHC {
+				debug.UpdateTs2phcState(string(data.State), data.Offset, ev.IFace)
 				debug.UpdateTs2phcState(string(dataDetails.State), 0, debug.OverallTs2phcKey)
 			}
 		}
@@ -128,10 +126,10 @@ func (c *GM) announceClockClassIfChanged(ev event.Event, clockState SyncState) {
 	}
 
 	clockAccuracy := c.announcedClockAccuracy
-	if ptp, ok := ev.Data.(*event.PTPData); ok && ev.Source == event.DPLL {
+	if dpll, ok := ev.Data.(*event.DPLLData); ok && ev.Source == event.DPLL {
 		if clockState.ClockClass == fbprotocol.ClockClass7 || clockState.ClockClass == protocol.ClockClassOutOfSpec {
-			if off, fnd := ptp.Values[event.OFFSET]; fnd {
-				clockAccuracy = fbprotocol.ClockAccuracyFromOffset(time.Duration(off.(int64)) * time.Nanosecond)
+			if dpll.Offset != nil {
+				clockAccuracy = fbprotocol.ClockAccuracyFromOffset(time.Duration(*dpll.Offset) * time.Nanosecond)
 			}
 		}
 	}

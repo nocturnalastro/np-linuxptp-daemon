@@ -174,7 +174,7 @@ func TestAny(t *testing.T) {
 	locked := event.Event{
 		Source:  event.TS2PHC,
 		CfgName: ttestTs2phcConditions,
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(500000)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 500000},
 	}
 	assert.True(t, c.Met(p, locked, stats))
 
@@ -204,7 +204,7 @@ func TestOnStateAndOffsetForCount(t *testing.T) {
 		return event.Event{
 			Source:  event.TS2PHC,
 			CfgName: ttestTs2phcConditions,
-			Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(offset)}},
+			Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: offset},
 		}
 	}
 

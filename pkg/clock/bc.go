@@ -72,7 +72,9 @@ func (c *BCClock) AddEvent(ev event.Event) SyncState {
 		d.AddEvent(ev)
 		d.UpdateState()
 
-		if _, ok := ev.Data.(*event.PTPData); !ok {
+		switch ev.Data.(type) {
+		case *event.OffsetData, *event.StateData, *event.DPLLData, *event.SyncEData:
+		default:
 			return SyncState{State: c.syncState, LeadingIFace: event.LEADING_INTERFACE_UNKNOWN}
 		}
 

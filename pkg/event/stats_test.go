@@ -242,6 +242,7 @@ func TestDataDetails_String_GNSSLike(t *testing.T) {
 		IFace:      statsTestEns7f0Iface,
 		State:      event.PTP_LOCKED,
 		Offset:     12,
+		HasOffset:  true,
 		SourceLost: false,
 	}
 	assert.Equal(t, "iface=ens7f0 state=s2 offset=12", dd.String())
@@ -257,8 +258,8 @@ func TestData_String_DPLLMultiPort(t *testing.T) {
 		ProcessName:   event.DPLL,
 		ProcessStatus: event.ProcessStatusUnset,
 		Details: []*event.DataDetails{
-			{IFace: statsTestEns7f0Iface, State: event.PTP_LOCKED, Offset: 5},
-			{IFace: "ens8f0", State: event.PTP_FREERUN, Offset: 99},
+			{IFace: statsTestEns7f0Iface, State: event.PTP_LOCKED, Offset: 5, HasOffset: true},
+			{IFace: "ens8f0", State: event.PTP_FREERUN, Offset: 99, HasOffset: true},
 		},
 	}
 	assert.Equal(t, "dpll {iface=ens7f0 state=s2 offset=5} {iface=ens8f0 state=s0 offset=99}", d.String())
@@ -287,9 +288,9 @@ func TestData_Summary_LastFieldsAndCount(t *testing.T) {
 		ProcessStatus: event.ProcessStatusUnset,
 		Details: []*event.DataDetails{
 			{ProcessStatus: 1, HasProcessStatus: true, Time: 1},
-			{IFace: "ens8f0", State: event.PTP_LOCKED, Offset: 5, Time: 2},
-			{IFace: statsTestEns1f0Iface, State: event.PTP_LOCKED, Offset: 3, Time: 3},
-			{IFace: "ens4f0", State: event.PTP_LOCKED, Offset: 0, Time: 4},
+			{IFace: "ens8f0", State: event.PTP_LOCKED, Offset: 5, HasOffset: true, Time: 2},
+			{IFace: statsTestEns1f0Iface, State: event.PTP_LOCKED, Offset: 3, HasOffset: true, Time: 3},
+			{IFace: "ens4f0", State: event.PTP_LOCKED, Offset: 0, HasOffset: true, Time: 4},
 		},
 	}
 	assert.Equal(t, "ts2phc n=4 iface=ens4f0 state=s2 offset=0 process_status=1", d.Summary())
@@ -298,8 +299,8 @@ func TestData_Summary_LastFieldsAndCount(t *testing.T) {
 		ProcessName:   event.GNSS,
 		ProcessStatus: event.ProcessStatusUnset,
 		Details: []*event.DataDetails{
-			{IFace: "ens4f0", State: event.PTP_LOCKED, Offset: 8, Time: 10},
-			{IFace: "ens4f0", State: event.PTP_FREERUN, Offset: 99, SourceLost: true, Time: 11},
+			{IFace: "ens4f0", State: event.PTP_LOCKED, Offset: 8, HasOffset: true, Time: 10},
+			{IFace: "ens4f0", State: event.PTP_FREERUN, Offset: 99, HasOffset: true, SourceLost: true, Time: 11},
 		},
 	}
 	assert.Equal(t, "gnss n=2 iface=ens4f0 state=s0 offset=99 sourceLost=true", gnss.Summary())
@@ -331,7 +332,7 @@ func TestData_AddEvent_ProcessStatusUpdatesExistingIface(t *testing.T) {
 		ProcessName:   event.DPLL,
 		ProcessStatus: event.ProcessStatusUnset,
 		Details: []*event.DataDetails{
-			{IFace: statsTestEns7f0Iface, State: event.PTP_LOCKED, Offset: 5},
+			{IFace: statsTestEns7f0Iface, State: event.PTP_LOCKED, HasOffset: true, Offset: 5},
 		},
 	}
 	d.AddEvent(event.ProcessStatusEvent(event.DPLL, "ts2phc.0.config", event.GM, statsTestEns7f0Iface, 1))

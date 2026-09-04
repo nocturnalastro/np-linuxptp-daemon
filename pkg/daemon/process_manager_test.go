@@ -699,9 +699,9 @@ func TestEvalActions_DelayedPhc2sysStartOnSubSecondOffset(t *testing.T) {
 			Source:  event.TS2PHC,
 			CfgName: cfgName,
 			IFace:   testETH0,
-			Data: &event.PTPData{
+			Data: &event.OffsetData{
 				State:  state,
-				Values: map[event.ValueType]interface{}{event.OFFSET: int64(offset)},
+				Offset: offset,
 			},
 		}
 	}
@@ -773,9 +773,9 @@ func TestEvalActions_DelayedPhc2sysWrongStateDoesNotStart(t *testing.T) {
 			Source:  event.TS2PHC,
 			CfgName: cfgName,
 			IFace:   testETH0,
-			Data: &event.PTPData{
+			Data: &event.OffsetData{
 				State:  event.PTP_FREERUN,
-				Values: map[event.ValueType]interface{}{event.OFFSET: int64(50000)},
+				Offset: 50000,
 			},
 		}
 		cm.GetClock(cfgName).GetData(event.TS2PHC).AddEvent(ev)
@@ -830,7 +830,7 @@ func TestEvalActions_DelayedPhc2sysTBCWaitsForPtp4l(t *testing.T) {
 		Source:  event.TS2PHC,
 		CfgName: "ts2phc.0.config",
 		IFace:   testETH0,
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(50000)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 50000},
 	}
 	cm.GetClock("ts2phc.0.config").GetData(event.TS2PHC).AddEvent(ts2phcEv)
 	cm.GetClock("ts2phc.0.config").GetData(event.TS2PHC).AddEvent(ts2phcEv)
@@ -843,7 +843,7 @@ func TestEvalActions_DelayedPhc2sysTBCWaitsForPtp4l(t *testing.T) {
 		Source:  event.PTP4l,
 		CfgName: cfgName,
 		IFace:   testETH0,
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(50000)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 50000},
 	}
 	cm.GetClock(cfgName).GetData(event.PTP4l).AddEvent(ptp4lEv)
 	cm.GetClock(cfgName).GetData(event.PTP4l).AddEvent(ptp4lEv)
@@ -897,7 +897,7 @@ func TestEvalActions_DelayedPhc2sysHAProfile(t *testing.T) {
 		Source:  event.PTP4l,
 		CfgName: master1,
 		IFace:   "ens1f1",
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(37000000000)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 37000000000},
 	}
 	cm.GetClock(master1).GetData(event.PTP4l).AddEvent(large)
 	cm.GetClock(master1).GetData(event.PTP4l).AddEvent(large)
@@ -910,7 +910,7 @@ func TestEvalActions_DelayedPhc2sysHAProfile(t *testing.T) {
 		Source:  event.PTP4l,
 		CfgName: master2,
 		IFace:   "ens2f0",
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(500000000)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 500000000},
 	}
 	cm.GetClock(master2).GetData(event.PTP4l).AddEvent(small)
 	cm.GetClock(master2).GetData(event.PTP4l).AddEvent(small)

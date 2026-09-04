@@ -195,9 +195,9 @@ func (p *ptpProcess) sendPtp4lOffsetEvent() {
 		IFace:     p.tBCAttributes.activeTRPort(),
 		ClockType: p.clockType,
 		Time:      time.Now().UnixMilli(),
-		Data: &event.PTPData{
+		Data: &event.OffsetData{
 			State:  p.tBCAttributes.lastReportedState,
-			Values: map[event.ValueType]interface{}{event.OFFSET: avgOffset},
+			Offset: avgOffset,
 		},
 	}:
 	default:
@@ -514,10 +514,6 @@ func (p *ptpProcess) processTs2PhcEvents(ptpOffset float64, source string, iface
 	}
 
 	if source == ts2phcProcessName { // for ts2phc send it to event to create metrics and events
-		vals := map[event.ValueType]interface{}{event.OFFSET: ptpOffsetInt64}
-		if nmeaStatus != nil {
-			vals[event.NMEA_STATUS] = *nmeaStatus
-		}
 		select {
 		case p.eventCh <- event.Event{
 			Source:     event.TS2PHC,
@@ -527,7 +523,11 @@ func (p *ptpProcess) processTs2PhcEvents(ptpOffset float64, source string, iface
 			Time:       time.Now().UnixMilli(),
 			WriteToLog: nmeaStatus != nil,
 			Reset:      false,
-			Data:       &event.PTPData{State: ptpState, Values: vals},
+			Data: &event.OffsetData{
+				State:      ptpState,
+				Offset:     ptpOffsetInt64,
+				NMEAStatus: nmeaStatus,
+			},
 		}:
 		default:
 		}
@@ -725,7 +725,7 @@ func (p *ptpProcess) processSynceEvents(logEntry synce.LogEntry) {
 	// synce4l[627602.593]: [synce4l.0.config] CLOCK_QUALITY  PRS    synce1  ens7f0
 	// synce4l[627602.540]: [synce4l.0.config] LOCKED   0     synce1
 
-	data := &event.PTPData{State: event.PTP_UNKNOWN, Values: map[event.ValueType]interface{}{}}
+	data := &event.SyncEData{State: event.PTP_UNKNOWN}
 	clockQuality := ""
 	iface := ""
 	populated := false
@@ -733,14 +733,14 @@ func (p *ptpProcess) processSynceEvents(logEntry synce.LogEntry) {
 	// synce4l[627602.540]: [synce4l.0.config] LOCKED   0     synce1
 	if logEntry.State != nil && logEntry.Source != nil {
 		if sDeviceConfig := p.SyncEDeviceByInterface(*logEntry.Source); sDeviceConfig != nil {
-			data.Values[event.DEVICE] = sDeviceConfig.Name
-			data.Values[event.NETWORK_OPTION] = sDeviceConfig.NetworkOption
+			data.Device = sDeviceConfig.Name
+			data.NetworkOption = sDeviceConfig.NetworkOption
 			iface = *logEntry.Source
 			tState := synce.StringToEECState(strings.ReplaceAll(*logEntry.State, "EEC_LOCKED_HO_ACQ", "EEC_LOCKED"))
 			glog.Infof("STATE %s", tState)
 			data.State = tState.ToPTPState()
 			sDeviceConfig.LastClockState = data.State
-			data.Values[event.EEC_STATE] = *logEntry.State
+			data.EECState = *logEntry.State
 			populated = true
 		}
 	} else if logEntry.State == nil && logEntry.Source != nil && (logEntry.QL != synce.QL_DEFAULT_SSM || logEntry.ExtQl != synce.QL_DEFAULT_SSM) {
@@ -748,9 +748,9 @@ func (p *ptpProcess) processSynceEvents(logEntry synce.LogEntry) {
 			iface = *logEntry.Source
 			// now decide on clock quality
 			if sDeviceConfig.ExtendedTlv == synce.ExtendedTLV_DISABLED && logEntry.QL != synce.QL_DEFAULT_SSM {
-				data.Values[event.DEVICE] = sDeviceConfig.Name
-				data.Values[event.NETWORK_OPTION] = sDeviceConfig.NetworkOption
-				data.Values[event.QL] = byte(logEntry.QL)
+				data.Device = sDeviceConfig.Name
+				data.NetworkOption = sDeviceConfig.NetworkOption
+				data.QL = event.BytePtr(logEntry.QL)
 				sDeviceConfig.LastQLState[*logEntry.Source] = &synce.QualityLevelInfo{
 					Priority:    0,
 					SSM:         logEntry.QL,
@@ -779,10 +779,10 @@ func (p *ptpProcess) processSynceEvents(logEntry synce.LogEntry) {
 					sDeviceConfig.LastQLState[*logEntry.Source] = lastQLState
 				}
 				if lastQLState.SSM != synce.QL_DEFAULT_SSM && logEntry.ExtQl != synce.QL_DEFAULT_SSM { // then have both ql
-					data.Values[event.NETWORK_OPTION] = sDeviceConfig.NetworkOption
-					data.Values[event.DEVICE] = sDeviceConfig.Name
-					data.Values[event.EXT_QL] = byte(logEntry.ExtQl)
-					data.Values[event.QL] = byte(lastQLState.SSM)
+					data.NetworkOption = sDeviceConfig.NetworkOption
+					data.Device = sDeviceConfig.Name
+					data.ExtQL = event.BytePtr(logEntry.ExtQl)
+					data.QL = event.BytePtr(lastQLState.SSM)
 					sDeviceConfig.LastQLState[*logEntry.Source].ExtendedSSM = logEntry.ExtQl
 					clockQuality, _ = sDeviceConfig.ClockQuality(synce.QualityLevelInfo{
 						SSM:         lastQLState.SSM,
@@ -801,7 +801,7 @@ func (p *ptpProcess) processSynceEvents(logEntry synce.LogEntry) {
 				}
 			}
 			if clockQuality != "" {
-				data.Values[event.CLOCK_QUALITY] = clockQuality
+				data.ClockQuality = clockQuality
 			}
 		}
 	}
@@ -895,13 +895,11 @@ func (p *ptpProcess) sendPtp4lStateEvent() {
 		ClockType: p.clockType,
 		Time:      time.Now().UnixMilli(),
 		Reset:     false,
-		Data: &event.PTPData{
-			State:      p.tBCAttributes.lastReportedState,
-			SourceLost: p.tBCAttributes.lastReportedState != event.PTP_LOCKED,
-			Values: map[event.ValueType]interface{}{
-				event.ControlledPortsConfig: p.tBCAttributes.ttPortsConfigFile,
-				event.ClockIDKey:            clockID,
-			},
+		Data: &event.StateData{
+			State:                 p.tBCAttributes.lastReportedState,
+			SourceLost:            p.tBCAttributes.lastReportedState != event.PTP_LOCKED,
+			ControlledPortsConfig: p.tBCAttributes.ttPortsConfigFile,
+			ClockID:               clockID,
 		},
 	}:
 	default:
