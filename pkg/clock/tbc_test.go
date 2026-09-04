@@ -630,6 +630,18 @@ func TestGetLeadingInterfaceBC(t *testing.T) {
 	}
 }
 
+func TestGetLeadingInterfaceBC_UsesConfiguredProfileInterface(t *testing.T) {
+	bc := newPMCTestTBCClock(nil)
+	bc.SetConfiguredLeadingInterface(testEth0)
+	assert.Equal(t, testEth0, bc.getLeadingInterfaceBC())
+
+	bc.Reset()
+	assert.Equal(t, testEth0, bc.getLeadingInterfaceBC(), "profile leadingInterface must survive Reset")
+
+	bc.leadingClockData.leadingInterface = testEth1
+	assert.Equal(t, testEth1, bc.getLeadingInterfaceBC(), "DPLL-learned interface takes precedence")
+}
+
 func TestInSpecCondition(t *testing.T) {
 	t.Run("returns false when MaxInSpecOffset is 0", func(t *testing.T) {
 		bc := newPMCTestTBCClock(nil)
@@ -794,7 +806,7 @@ func TestAddEvent_SourceLostPropagation(t *testing.T) {
 				Source: event.PTP4l,
 				IFace:  testEno8703,
 				Time:   now,
-				Data:   &event.PTPData{State: event.PTP_FREERUN, SourceLost: true},
+				Data:   &event.PTPData{State: event.PTP_FREERUN, SourceLost: true, Values: map[event.ValueType]interface{}{}},
 			},
 			expectedStates: map[string]event.PTPState{
 				testEno8903: event.PTP_LOCKED,
@@ -849,7 +861,7 @@ func TestIsSourceLostBC_StaleDetailFixed(t *testing.T) {
 			Source: event.PTP4l,
 			IFace:  testEno8703,
 			Time:   now,
-			Data:   &event.PTPData{State: event.PTP_FREERUN, SourceLost: true},
+			Data:   &event.PTPData{State: event.PTP_FREERUN, SourceLost: true, Values: map[event.ValueType]interface{}{}},
 		})
 
 		assert.False(t, bc.isSourceLostBC(), "stale LOCKED detail on other iface prevents ptpLost")
@@ -923,11 +935,7 @@ func TestProcessSyncE(t *testing.T) {
 		ev := event.Event{
 			Source: event.SYNCE,
 			IFace:  testEns7f0,
-			Data: &event.PTPData{
-				Values: map[event.ValueType]interface{}{
-					event.EEC_STATE: "EEC_LOCKED",
-				},
-			},
+			Data:   &event.PTPData{Values: map[event.ValueType]interface{}{event.EEC_STATE: "EEC_LOCKED"}},
 		}
 		bc.processSyncE(ev)
 		assert.Len(t, rio.messages, 1)
@@ -943,12 +951,7 @@ func TestProcessSyncE(t *testing.T) {
 		ev := event.Event{
 			Source: event.SYNCE,
 			IFace:  testEns7f0,
-			Data: &event.PTPData{
-				Values: map[event.ValueType]interface{}{
-					event.QL:     byte(4),
-					event.EXT_QL: byte(0xFF),
-				},
-			},
+			Data:   &event.PTPData{Values: map[event.ValueType]interface{}{event.QL: byte(4), event.EXT_QL: byte(0xFF)}},
 		}
 		bc.processSyncE(ev)
 		assert.Len(t, rio.messages, 1)
@@ -957,7 +960,7 @@ func TestProcessSyncE(t *testing.T) {
 		assert.Equal(t, ipc.SyncEClockQualityValue{QL: 4, ExtendedQL: 0xFF}, rio.messages[0].Values)
 	})
 
-	t.Run("nil PTPData does not panic", func(t *testing.T) {
+	t.Run("nil Data does not panic", func(t *testing.T) {
 		rio := &ipcRecorder{}
 		bc := &TBC{cfgName: testPTP4lCfg, sendIPC: rio.send}
 		bc.processSyncE(event.Event{Source: event.SYNCE, Data: nil})
@@ -1059,8 +1062,8 @@ func makeTBCEvent(process event.EventSource, state event.PTPState, offset int64,
 		WriteToLog: true,
 		Data: &event.PTPData{
 			State:      state,
-			Values:     map[event.ValueType]interface{}{event.OFFSET: offset},
 			SourceLost: sourceLost,
+			Values:     map[event.ValueType]interface{}{event.OFFSET: int64(offset)},
 		},
 	}
 }
@@ -1101,4 +1104,16 @@ func newLockedTBCClock() (*TBC, *ipcRecorder) {
 	fillBCDataWindows(bc, 10)
 	bc.AddEvent(makeTBCEvent(event.DPLL, event.PTP_LOCKED, 10, false))
 	return bc, &rec
+}
+
+func TestTBC_AddEvent_ProcessStatusDoesNotCreateData(t *testing.T) {
+	bc := &TBC{cfgName: testPTP4lCfg, sendIPC: func(ipc.Message) {}}
+	cs := bc.AddEvent(event.ProcessStatusEvent(event.PTP4l, testPTP4lCfg, event.TBC, "", 1))
+	assert.Empty(t, cs.State)
+	data := bc.ProcessData()
+	require.Len(t, data, 1)
+	assert.Equal(t, event.PTP4l, data[0].ProcessName)
+	assert.Equal(t, event.PTP_UNKNOWN, data[0].State)
+	assert.Empty(t, data[0].Details)
+	assert.Equal(t, int64(1), data[0].ProcessStatus)
 }

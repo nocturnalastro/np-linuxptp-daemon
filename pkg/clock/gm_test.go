@@ -376,8 +376,8 @@ func TestUpdateGMState(t *testing.T) {
 		} else {
 			e.Data = &event.PTPData{
 				State:      state,
-				Values:     map[event.ValueType]interface{}{event.OFFSET: int64(0)},
 				SourceLost: sourceLost,
+				Values:     map[event.ValueType]interface{}{event.OFFSET: int64(0)},
 			}
 		}
 		return e
@@ -463,4 +463,17 @@ func TestUpdateGMState(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGM_AddEvent_ProcessStatusDoesNotCreateData(t *testing.T) {
+	gm, rio, _ := newTestGMClock()
+	cs := gm.AddEvent(event.ProcessStatusEvent(event.GPSPIPE, testTS2PHCCfg, event.GM, "", 1))
+	assert.Equal(t, event.PTP_NOTSET, cs.State)
+	data := gm.ProcessData()
+	require.Len(t, data, 1)
+	assert.Equal(t, event.GPSPIPE, data[0].ProcessName)
+	assert.Equal(t, event.PTP_UNKNOWN, data[0].State)
+	assert.Empty(t, data[0].Details)
+	assert.Equal(t, int64(1), data[0].ProcessStatus)
+	assert.Empty(t, rio.messages)
 }

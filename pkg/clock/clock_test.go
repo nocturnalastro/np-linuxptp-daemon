@@ -40,7 +40,7 @@ func TestAddEvent_StoresSpecFlags(t *testing.T) {
 		assert.True(t, dd.FrequencyTraceable)
 	})
 
-	t.Run("non-DPLL PTPData stores its own flags independently", func(t *testing.T) {
+	t.Run("non-DPLL offset event stores its own flags independently", func(t *testing.T) {
 		dpll := &event.Data{ProcessName: event.DPLL, State: event.PTP_UNKNOWN, Window: *utils.NewWindow(event.WindowSize)}
 		dpll.AddEvent(event.Event{
 			Source: event.DPLL, IFace: "ens1f0", ClockType: event.GM, Time: 0,
@@ -50,7 +50,7 @@ func TestAddEvent_StoresSpecFlags(t *testing.T) {
 		ts := &event.Data{ProcessName: event.TS2PHCProcessName, State: event.PTP_UNKNOWN, Window: *utils.NewWindow(event.WindowSize)}
 		ts.AddEvent(event.Event{
 			Source: event.TS2PHC, IFace: "ens1f0", ClockType: event.GM, Time: 0,
-			Data: &event.PTPData{State: event.PTP_LOCKED, OutOfSpec: false, FrequencyTraceable: false, Values: map[event.ValueType]interface{}{event.OFFSET: int64(0)}},
+			Data: &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(0)}},
 		})
 
 		dpllDD := dpll.GetDataDetails("ens1f0")

@@ -87,10 +87,14 @@ func Init(nodeName string, processChannel chan event.Event, offsetMetric *promet
 // AddClock creates a Clock for the given config and registers it.
 // If a clock is already registered for cfgName it is replaced.
 // pmcClient may be nil for clock types that do not use PMC (e.g. BC, OC).
-func (m *ClockManager) AddClock(cfgName string, clockType event.ClockType, pmcClient pmc.Client) (clock.Clock, error) {
+// leadingInterface is only used for TBC clocks; pass "" for other types.
+func (m *ClockManager) AddClock(cfgName string, clockType event.ClockType, pmcClient pmc.Client, leadingInterface string) (clock.Clock, error) {
 	clk, err := clock.NewClock(cfgName, clockType, m.sendIPC, m.sendEvent, m.GetUtcOffset, pmcClient)
 	if err != nil {
 		return nil, err
+	}
+	if tbc, ok := clk.(*clock.TBC); ok && leadingInterface != "" {
+		tbc.SetConfiguredLeadingInterface(leadingInterface)
 	}
 	m.clockManagementMu.Lock()
 	defer m.clockManagementMu.Unlock()
@@ -106,6 +110,43 @@ func (m *ClockManager) AddClock(cfgName string, clockType event.ClockType, pmcCl
 	}
 	glog.Infof("AddClock: registered %s clock for config %s", clockType, cfgName)
 	return clk, nil
+}
+
+// GetWindows returns offset sample windows keyed by clock map name.
+// When a config alias (ptp4l vs ts2phc) is registered, only the window whose
+// process name is contained in that alias is returned.
+func (m *ClockManager) GetWindows() map[string]*utils.Window {
+	m.clockManagementMu.Lock()
+	defer m.clockManagementMu.Unlock()
+	out := make(map[string]*utils.Window, len(m.clocks))
+	for cfgName, clk := range m.clocks {
+		if clk == nil {
+			continue
+		}
+		for _, d := range clk.ProcessData() {
+			if d == nil {
+				continue
+			}
+			if strings.Contains(cfgName, string(d.ProcessName)) {
+				out[cfgName] = &d.Window
+				break
+			}
+		}
+	}
+	return out
+}
+
+// SetPortRole saves the port role change event for a config/port pair.
+func (m *ClockManager) SetPortRole(cfgName, portName string, ev *parser.PTPEvent) {
+	m.clockManagementMu.Lock()
+	defer m.clockManagementMu.Unlock()
+	if m.portRole == nil {
+		m.portRole = make(map[string]map[string]*parser.PTPEvent)
+	}
+	if _, ok := m.portRole[cfgName]; !ok {
+		m.portRole[cfgName] = make(map[string]*parser.PTPEvent)
+	}
+	m.portRole[cfgName][portName] = ev
 }
 
 // RemoveAllClocks tears down all registered clocks and cleans up associated state.
@@ -167,10 +208,8 @@ func (m *ClockManager) handleOSClockEvent(ev event.Event) {
 
 	// if the OS clock state changed, emit the event to CEP and also pass it along to each clock
 	var osOffset int64
-	if v, exists := ptp.Values[event.OFFSET]; exists {
-		if i, isInt := v.(int64); isInt {
-			osOffset = i
-		}
+	if off, fnd := ptp.Values[event.OFFSET]; fnd {
+		osOffset = off.(int64)
 	}
 	m.sendIPC(ipc.Message{
 		Type:   ipc.TypeOSClockState,
@@ -194,8 +233,6 @@ func (m *ClockManager) ProcessEvents(ctx context.Context) {
 			// TODO: This is a pretty large lock. Using it for simplicity. We should evaluate this in the future.
 			//       I think a combination of the manager lock + locks for each individual clock will be the end goal.
 			m.clockManagementMu.Lock()
-			glog.V(14).Infof("ProcessEvents: received event source=%s iface=%s cfg=%s clockType=%s reset=%v",
-				ev.Source, ev.IFace, ev.CfgName, ev.ClockType, ev.Reset)
 			if ev.Reset {
 				m.reset(ev)
 				m.clockManagementMu.Unlock()
@@ -232,7 +269,8 @@ func (m *ClockManager) ProcessEvents(ctx context.Context) {
 				}
 			}
 			clockState := clk.AddEvent(ev)
-			if clockState.LeadingIFace != event.LEADING_INTERFACE_UNKNOWN {
+			if clockState.LeadingIFace != "" &&
+				clockState.LeadingIFace != event.LEADING_INTERFACE_UNKNOWN {
 				m.updateClockStateMetrics(clockState.State, string(ev.ClockType), alias.GetAlias(clockState.LeadingIFace))
 			}
 			m.updateMetrics(ev)

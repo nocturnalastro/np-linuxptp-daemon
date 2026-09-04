@@ -55,11 +55,16 @@ func (c *GM) Reset() {
 
 // AddEvent processes an event and updates clock state.
 func (c *GM) AddEvent(ev event.Event) SyncState {
+	if _, ok := ev.Data.(*event.ProcessStatusData); ok {
+		d := c.GetData(ev.Source)
+		d.AddEvent(ev)
+		return c.syncState
+	}
 	if ev.Source == event.PMC {
 		return c.syncState
 	}
 
-	d := c.getData(ev.Source)
+	d := c.GetData(ev.Source)
 	d.AddEvent(ev)
 	d.UpdateState()
 	clockState := c.updateState()
@@ -68,9 +73,9 @@ func (c *GM) AddEvent(ev event.Event) SyncState {
 
 	// Zero NMEA status when GM is not locked
 	if clockState.State != event.PTP_LOCKED {
-		if ptp, isPTP := ev.Data.(*event.PTPData); isPTP {
+		if ptp, ok := ev.Data.(*event.PTPData); ok {
 			if _, hasNMEA := ptp.Values[event.NMEA_STATUS]; hasNMEA {
-				ptp.Values[event.NMEA_STATUS] = 0
+				ptp.Values[event.NMEA_STATUS] = int64(0)
 			}
 		}
 	}
@@ -82,12 +87,15 @@ func (c *GM) AddEvent(ev event.Event) SyncState {
 		case *event.GNSSData:
 			debug.UpdateGNSSState(string(dataDetails.State), data.Offset)
 		case *event.PTPData:
-			switch ev.Source {
-			case event.DPLL:
+			if ev.Source == event.DPLL {
 				debug.UpdateDPLLState(string(data.State), data.Values[event.OFFSET], ev.IFace)
 				debug.UpdateDPLLState(string(dataDetails.State), 0, debug.OverallDpllKey)
-			case event.TS2PHC:
-				debug.UpdateTs2phcState(string(data.State), data.Values[event.OFFSET], ev.IFace)
+			} else if ev.Source == event.TS2PHC {
+				var offset int64
+				if off, fnd := data.Values[event.OFFSET]; fnd {
+					offset = off.(int64)
+				}
+				debug.UpdateTs2phcState(string(data.State), offset, ev.IFace)
 				debug.UpdateTs2phcState(string(dataDetails.State), 0, debug.OverallTs2phcKey)
 			}
 		}
@@ -97,15 +105,21 @@ func (c *GM) AddEvent(ev event.Event) SyncState {
 	return clockState
 }
 
-func (c *GM) getData(processName event.EventSource) *event.Data {
+// GetData returns the Data entry for the given process, creating one if needed.
+func (c *GM) GetData(processName event.EventSource) *event.Data {
 	for _, d := range c.data {
 		if d.ProcessName == processName {
 			return d
 		}
 	}
-	d := &event.Data{ProcessName: processName, State: event.PTP_UNKNOWN, Window: *utils.NewWindow(event.WindowSize)}
+	d := &event.Data{ProcessName: processName, State: event.PTP_UNKNOWN, ProcessStatus: event.ProcessStatusUnset, Window: *utils.NewWindow(event.WindowSize)}
 	c.data = append(c.data, d)
 	return d
+}
+
+// ProcessData returns all clock data accumulated from processed events.
+func (c *GM) ProcessData() []*event.Data {
+	return c.data
 }
 
 func (c *GM) announceClockClassIfChanged(ev event.Event, clockState SyncState) {
@@ -114,12 +128,10 @@ func (c *GM) announceClockClassIfChanged(ev event.Event, clockState SyncState) {
 	}
 
 	clockAccuracy := c.announcedClockAccuracy
-	if ptp, isPTP := ev.Data.(*event.PTPData); isPTP && ev.Source == event.DPLL {
+	if ptp, ok := ev.Data.(*event.PTPData); ok && ev.Source == event.DPLL {
 		if clockState.ClockClass == fbprotocol.ClockClass7 || clockState.ClockClass == protocol.ClockClassOutOfSpec {
-			if offset, found := ptp.Values[event.OFFSET]; found {
-				if offsetValue, isInt64 := offset.(int64); isInt64 {
-					clockAccuracy = fbprotocol.ClockAccuracyFromOffset(time.Duration(offsetValue) * time.Nanosecond)
-				}
+			if off, fnd := ptp.Values[event.OFFSET]; fnd {
+				clockAccuracy = fbprotocol.ClockAccuracyFromOffset(time.Duration(off.(int64)) * time.Nanosecond)
 			}
 		}
 	}
@@ -352,7 +364,7 @@ func (c *GM) updateState() SyncState {
 	leadingInterface := c.getLeadingInterface()
 	glog.Infof("GM updateState: leadingInterface=%s, data entries=%d", leadingInterface, len(c.data))
 	for _, d := range c.data {
-		glog.Infof("  Data: process=%s state=%s details=%d", d.ProcessName, d.State, len(d.Details))
+		glog.Infof("  %s", d.Summary())
 	}
 	if leadingInterface == event.LEADING_INTERFACE_UNKNOWN {
 		glog.Infof("Leading interface is not yet identified, clock state reporting delayed.")
@@ -522,7 +534,7 @@ func (c *GM) updateState() SyncState {
 	if c.syncState.LastLoggedTime != logTime {
 		c.syncState.LastLoggedTime = logTime
 		glog.Info(c.status())
-		glog.Infof("dpll State %s, gnss State %s, tsphc state %s, gm state %s,", dpllState, gnssState, ts2phcState, c.syncState.State)
+		glog.Infof("dpll State %s, gnss State %s, ts2phc state %s, gm state %s,", dpllState, gnssState, ts2phcState, c.syncState.State)
 	}
 	return result
 }
