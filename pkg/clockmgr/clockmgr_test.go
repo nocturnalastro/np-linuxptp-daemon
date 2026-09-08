@@ -1,7 +1,9 @@
 package clockmgr
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	fbprotocol "github.com/facebook/time/ptp/protocol"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/clock"
@@ -12,11 +14,6 @@ import (
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
-
-const (
-	testClockmgrETH0        = "eth0"
-	testClockmgrPtp4lConfig = "ptp4l.0.config"
 )
 
 // GetPTPState returns the stored PTP state for source under cfgName.
@@ -44,7 +41,7 @@ func TestClockManager_GetDataAndPTPState(t *testing.T) {
 	ev := event.Event{
 		Source:  event.TS2PHC,
 		CfgName: "ts2phc.0.config",
-		IFace:   testClockmgrETH0,
+		IFace:   "eth0",
 		Data: &event.OffsetData{
 			State:  event.PTP_LOCKED,
 			Offset: 100,
@@ -61,7 +58,7 @@ func TestClockManager_EmitClockClassAndIPCCache(t *testing.T) {
 	cache := ipc.NewCache(10)
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, cache)
 
-	clk, err := cm.AddClock(testClockmgrPtp4lConfig, event.OC, nil, "")
+	clk, err := cm.AddClock("ptp4l.0.config", event.OC, nil, "")
 	require.NoError(t, err)
 	bc, ok := clk.(*clock.BCClock)
 	require.True(t, ok)
@@ -84,33 +81,33 @@ func TestClockManager_EmitClockClassAndIPCCache(t *testing.T) {
 
 func TestClockManager_GetWindowsPrefersMatchingProcess(t *testing.T) {
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
-	_, err := cm.AddClock(testClockmgrPtp4lConfig, event.OC, nil, "")
+	_, err := cm.AddClock("ptp4l.0.config", event.OC, nil, "")
 	require.NoError(t, err)
 	_, err = cm.AddClock("ts2phc.0.config", event.OC, nil, "")
 	require.NoError(t, err)
 
 	ptp4lEv := event.Event{
 		Source:  event.PTP4l,
-		CfgName: testClockmgrPtp4lConfig,
-		IFace:   testClockmgrETH0,
+		CfgName: "ptp4l.0.config",
+		IFace:   "eth0",
 		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 10},
 	}
 	ts2phcEv := event.Event{
 		Source:  event.TS2PHC,
 		CfgName: "ts2phc.0.config",
-		IFace:   testClockmgrETH0,
+		IFace:   "eth0",
 		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 99},
 	}
 	// AddEvent only records the offset window after the iface already exists.
-	cm.GetClock(testClockmgrPtp4lConfig).GetData(event.PTP4l).AddEvent(ptp4lEv)
-	cm.GetClock(testClockmgrPtp4lConfig).GetData(event.PTP4l).AddEvent(ptp4lEv)
+	cm.GetClock("ptp4l.0.config").GetData(event.PTP4l).AddEvent(ptp4lEv)
+	cm.GetClock("ptp4l.0.config").GetData(event.PTP4l).AddEvent(ptp4lEv)
 	cm.GetClock("ts2phc.0.config").GetData(event.TS2PHC).AddEvent(ts2phcEv)
 	cm.GetClock("ts2phc.0.config").GetData(event.TS2PHC).AddEvent(ts2phcEv)
 
-	windows := cm.GetWindows([]process.WindowRequest{{ClockID: testClockmgrPtp4lConfig, Source: event.PTP4l}, {ClockID: "ts2phc.0.config", Source: event.TS2PHC}})
-	require.NotNil(t, windows[testClockmgrPtp4lConfig])
+	windows := cm.GetWindows([]process.WindowRequest{{ClockID: "ptp4l.0.config", Source: event.PTP4l}, {ClockID: "ts2phc.0.config", Source: event.TS2PHC}})
+	require.NotNil(t, windows["ptp4l.0.config"])
 	require.NotNil(t, windows["ts2phc.0.config"])
-	assert.Equal(t, float64(10), windows[testClockmgrPtp4lConfig][event.PTP4l].LastInserted())
+	assert.Equal(t, float64(10), windows["ptp4l.0.config"][event.PTP4l].LastInserted())
 	assert.Equal(t, float64(99), windows["ts2phc.0.config"][event.TS2PHC].LastInserted())
 	assert.Nil(t, windows["missing.config"])
 }
@@ -127,4 +124,183 @@ func TestClockManager_SetTBCLeadingInterface(t *testing.T) {
 		Data:    &event.OffsetData{State: event.PTP_FREERUN, Offset: 49880},
 	})
 	assert.Equal(t, "ens1f0", state.LeadingIFace)
+}
+
+func TestClockManager_PHC2SYS_ReturnedViaProcessData(t *testing.T) {
+	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
+	clk, err := cm.AddClock("ptp4l.0.config", event.OC, nil, "")
+	require.NoError(t, err)
+
+	phc2sysEv1 := event.Event{
+		Source:  event.PHC2SYS,
+		CfgName: "ptp4l.0.config",
+		IFace:   "eth0",
+		Data: &event.OffsetData{
+			State:  event.PTP_LOCKED,
+			Offset: 1234,
+		},
+	}
+	phc2sysEv2 := event.Event{
+		Source:  event.PHC2SYS,
+		CfgName: "ptp4l.0.config",
+		IFace:   "eth0",
+		Data: &event.OffsetData{
+			State:  event.PTP_LOCKED,
+			Offset: 5678,
+		},
+	}
+
+	cm.handleOSClockEvent(phc2sysEv1)
+	cm.handleOSClockEvent(phc2sysEv2)
+
+	dataList := clk.ProcessData()
+	require.NotEmpty(t, dataList)
+
+	var phc2sysData *event.Data
+	for _, d := range dataList {
+		if d.ProcessName == event.PHC2SYS {
+			phc2sysData = d
+			break
+		}
+	}
+	require.NotNil(t, phc2sysData, "ProcessData from clock must include PHC2SYS data")
+	assert.Equal(t, float64(5678), phc2sysData.Window.LastInserted())
+	assert.Equal(t, event.PTP_LOCKED, phc2sysData.State)
+}
+
+func TestClockManager_PHC2SYS_ProcessEventsLoop(t *testing.T) {
+	evCh := make(chan event.Event, 10)
+	cm := Init("test-node", evCh, nil, nil, nil, nil)
+	clk, err := cm.AddClock("ptp4l.0.config", event.OC, nil, "")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go cm.ProcessEvents(ctx)
+
+	// Send initial event to register interface detail and second to insert sample into window
+	for _, offset := range []int64{100, 200, 300} {
+		evCh <- event.Event{
+			Source:  event.PHC2SYS,
+			CfgName: "ptp4l.0.config",
+			IFace:   "eth0",
+			Data: &event.OffsetData{
+				State:  event.PTP_LOCKED,
+				Offset: offset,
+			},
+		}
+	}
+
+	assert.Eventually(t, func() bool {
+		for _, d := range clk.ProcessData() {
+			if d.ProcessName == event.PHC2SYS && d.Window.LastInserted() == 300 {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond, "PHC2SYS event should be processed and reflected in clock ProcessData")
+}
+
+func TestClockManager_PHC2SYS_SharedAcrossMultipleClocks(t *testing.T) {
+	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
+	clk1, err := cm.AddClock("ptp4l.0.config", event.TBC, &pmc.MockClient{}, "")
+	require.NoError(t, err)
+	clk2, err := cm.AddClock("ptp4l.1.config", event.OC, nil, "")
+	require.NoError(t, err)
+	clk3, err := cm.AddClock("ts2phc.0.config", event.GM, &pmc.MockClient{}, "")
+	require.NoError(t, err)
+
+	// Send PHC2SYS offset event
+	for _, offset := range []int64{500, 1500} {
+		cm.handleOSClockEvent(event.Event{
+			Source:  event.PHC2SYS,
+			CfgName: "ptp4l.0.config",
+			IFace:   "eth0",
+			Data: &event.OffsetData{
+				State:  event.PTP_LOCKED,
+				Offset: offset,
+			},
+		})
+	}
+
+	// Verify all clocks receive the shared PHC2SYS data via their ProcessData()
+	for _, clk := range []clock.Clock{clk1, clk2, clk3} {
+		var foundPHC2SYS bool
+		for _, d := range clk.ProcessData() {
+			if d.ProcessName == event.PHC2SYS {
+				foundPHC2SYS = true
+				assert.Equal(t, float64(1500), d.Window.LastInserted())
+				assert.Equal(t, event.PTP_LOCKED, d.State)
+			}
+		}
+		assert.True(t, foundPHC2SYS, "clock %s should contain PHC2SYS in ProcessData()", clk.ConfigName())
+	}
+}
+
+func TestClockManager_PHC2SYS_GetWindowsQuery(t *testing.T) {
+	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
+	clk, err := cm.AddClock("ptp4l.0.config", event.OC, nil, "")
+	require.NoError(t, err)
+
+	for _, offset := range []int64{25, 50} {
+		cm.handleOSClockEvent(event.Event{
+			Source:  event.PHC2SYS,
+			CfgName: "ptp4l.0.config",
+			IFace:   "eth0",
+			Data: &event.OffsetData{
+				State:  event.PTP_LOCKED,
+				Offset: offset,
+			},
+		})
+	}
+
+	// Query via GetWindows
+	windows := cm.GetWindows([]process.WindowRequest{
+		{ClockID: "ptp4l.0.config", Source: event.PHC2SYS},
+	})
+	require.NotNil(t, windows["ptp4l.0.config"])
+	require.NotNil(t, windows["ptp4l.0.config"][event.PHC2SYS])
+	assert.Equal(t, float64(50), windows["ptp4l.0.config"][event.PHC2SYS].LastInserted())
+
+	// Also verify directly from ProcessData
+	var phc2sysData *event.Data
+	for _, d := range clk.ProcessData() {
+		if d.ProcessName == event.PHC2SYS {
+			phc2sysData = d
+			break
+		}
+	}
+	require.NotNil(t, phc2sysData)
+	assert.Equal(t, windows["ptp4l.0.config"][event.PHC2SYS], &phc2sysData.Window)
+}
+
+func TestClockManager_PHC2SYS_RemoveAllClocksResetsData(t *testing.T) {
+	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
+	clk, err := cm.AddClock("ptp4l.0.config", event.OC, nil, "")
+	require.NoError(t, err)
+
+	for _, offset := range []int64{100, 200} {
+		cm.handleOSClockEvent(event.Event{
+			Source:  event.PHC2SYS,
+			CfgName: "ptp4l.0.config",
+			IFace:   "eth0",
+			Data: &event.OffsetData{
+				State:  event.PTP_LOCKED,
+				Offset: offset,
+			},
+		})
+	}
+
+	// Verify data is present
+	require.NotEmpty(t, clk.ProcessData())
+
+	// Reset via RemoveAllClocks
+	cm.RemoveAllClocks()
+
+	// Re-add clock and verify ProcessData has no stale PHC2SYS data
+	newClk, err := cm.AddClock("ptp4l.0.config", event.OC, nil, "")
+	require.NoError(t, err)
+	for _, d := range newClk.ProcessData() {
+		assert.NotEqual(t, event.PHC2SYS, d.ProcessName, "stale PHC2SYS data must be cleared on Reset")
+	}
 }

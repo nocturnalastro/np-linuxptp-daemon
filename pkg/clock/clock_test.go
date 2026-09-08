@@ -71,7 +71,7 @@ func TestNewClock(t *testing.T) {
 	noopUtc := func() int { return 0 }
 
 	t.Run("OC creates a BCClock reporting OC", func(t *testing.T) {
-		clk, err := NewClock(testPTP4lCfg, event.OC, noopIPC, noopEvent, noopUtc, nil)
+		clk, err := NewClock(testPTP4lCfg, event.OC, noopIPC, noopEvent, noopUtc, nil, &OsClock{State: event.PTP_FREERUN})
 		require.NoError(t, err)
 		require.NotNil(t, clk)
 		assert.Equal(t, event.OC, clk.ClockType())
@@ -79,7 +79,7 @@ func TestNewClock(t *testing.T) {
 	})
 
 	t.Run("BC creates a BCClock reporting BC", func(t *testing.T) {
-		clk, err := NewClock(testPTP4lCfg, event.BC, noopIPC, noopEvent, noopUtc, nil)
+		clk, err := NewClock(testPTP4lCfg, event.BC, noopIPC, noopEvent, noopUtc, nil, &OsClock{State: event.PTP_FREERUN})
 		require.NoError(t, err)
 		require.NotNil(t, clk)
 		assert.Equal(t, event.BC, clk.ClockType())
@@ -87,7 +87,7 @@ func TestNewClock(t *testing.T) {
 	})
 
 	t.Run("unsupported clock type errors", func(t *testing.T) {
-		_, err := NewClock(testPTP4lCfg, event.ClockType("bogus"), noopIPC, noopEvent, noopUtc, nil)
+		_, err := NewClock(testPTP4lCfg, event.ClockType("bogus"), noopIPC, noopEvent, noopUtc, nil, &OsClock{State: event.PTP_FREERUN})
 		assert.Error(t, err)
 	})
 }
