@@ -36,7 +36,7 @@ type ClockManager struct {
 	clockMetric       *prometheus.GaugeVec
 	clockClassMetric  *prometheus.GaugeVec
 	clocks            map[string]clock.Clock // cfgName → Clock
-	osClockState      event.PTPState
+	osClock           clock.OsClock
 	ipcCache          *ipc.Cache
 	// applyingProfiles is set while applyNodePTPProfiles is tearing down /
 	// restarting processes. When true, T-BC/T-TSC events are skipped so
@@ -77,7 +77,7 @@ func Init(nodeName string, processChannel chan event.Event, offsetMetric *promet
 		offsetMetric:     offsetMetric,
 		clockClassMetric: clockClassMetric,
 		clocks:           map[string]clock.Clock{},
-		osClockState:     event.PTP_NOTSET,
+		osClock:          clock.OsClock{State: event.PTP_FREERUN},
 		ipcCache:         ipcCache,
 	}
 }
@@ -110,7 +110,9 @@ func (m *ClockManager) AddClock(cfgName string, clockType event.ClockType, pmcCl
 	return clk, nil
 }
 
-// GetWindows returns offset sample windows requested by process conditions.
+// GetWindows returns offset sample windows keyed by clock config name.
+// If requiredStatsConfigs is empty, all windows are returned.
+// Otherwise, only windows for configs in requiredStatsConfigs are returned.
 func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[string]map[event.EventSource]*utils.Window {
 	m.clockManagementMu.Lock()
 	defer m.clockManagementMu.Unlock()
@@ -126,6 +128,8 @@ func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[st
 			out[req.ClockID] = map[event.EventSource]*utils.Window{}
 		}
 
+		// TODO: We might want to process the requests and group them in the future so
+		// requests for the same clock but different event source can be done in one go
 		for _, d := range clk.ProcessData() {
 			if d == nil {
 				continue
@@ -141,7 +145,7 @@ func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[st
 // RemoveAllClocks tears down all registered clocks and cleans up associated state.
 func (m *ClockManager) RemoveAllClocks() {
 	m.clockManagementMu.Lock()
-	m.osClockState = event.PTP_NOTSET
+	m.osClock.Reset()
 
 	for cfgName := range m.clocks {
 		m.unregisterMetrics(cfgName, "")
@@ -181,14 +185,14 @@ func (m *ClockManager) GetUtcOffset() int {
 // handleOSClockEvent fans out a PHC2SYS/CHRONYD event to all clocks, emits os_clock_state message once, and emits
 // a sync_state message per-profile when the overall state changes.
 func (m *ClockManager) handleOSClockEvent(ev event.Event) {
-	prevClockState := m.osClockState
+	prevClockState := m.osClock
 	ptp, ok := ev.Data.(*event.OffsetData)
 	if !ok {
 		glog.Warningf("handleOSClockEvent: received unexpected event")
 		return
 	}
-	m.osClockState = ptp.State
-	if m.osClockState == prevClockState {
+	m.osClock.State = ptp.State
+	if m.osClock == prevClockState {
 		return
 	}
 
@@ -197,10 +201,10 @@ func (m *ClockManager) handleOSClockEvent(ev event.Event) {
 	m.sendIPC(ipc.Message{
 		Type:   ipc.TypeOSClockState,
 		IFace:  ev.IFace,
-		Values: ipc.StateValue{State: event.PtpStateToIPCState(m.osClockState), Offset: osOffset},
+		Values: ipc.StateValue{State: event.PtpStateToIPCState(m.osClock.State), Offset: osOffset},
 	})
 	for _, clk := range m.clocks {
-		clk.SystemClockUpdate(m.osClockState)
+		clk.SystemClockUpdate(m.osClock.State)
 	}
 }
 

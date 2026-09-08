@@ -21,8 +21,12 @@ func newTestGMClock() (*GM, *ipcRecorder, *pmc.MockClient) {
 	rio := &ipcRecorder{}
 	pmcMock := &pmc.MockClient{}
 	gm := &GM{
-		cfgName:      "ts2phc.0.config",
-		sendIPC:      rio.send,
+		BaseClock: BaseClock{
+			cfgName:          "ts2phc.0.config",
+			sendIPC:          rio.send,
+			overallSyncState: event.PTP_NOTSET,
+			osClock:          OsClock{event.PTP_NOTSET},
+		},
 		getUtcOffset: stubUtcOffset,
 		pmcClient:    pmcMock,
 		syncState: SyncState{
@@ -30,9 +34,7 @@ func newTestGMClock() (*GM, *ipcRecorder, *pmc.MockClient) {
 			ClockClass:    protocol.ClockClassUninitialized,
 			ClockAccuracy: fbprotocol.ClockAccuracyUnknown,
 		},
-		overallSyncState: event.PTP_NOTSET,
-		osClockState:     event.PTP_NOTSET,
-		gnssState:        event.PTP_NOTSET,
+		gnssState: event.PTP_NOTSET,
 	}
 	return gm, rio, pmcMock
 }
@@ -229,7 +231,7 @@ func TestGMClock_UpdateOSClockState(t *testing.T) {
 
 	gm.SystemClockUpdate(event.PTP_LOCKED)
 	assert.Equal(t, event.PTP_LOCKED, gm.overallSyncState, "first call from PTP_NOTSET should change")
-	assert.Equal(t, event.PTP_LOCKED, gm.osClockState)
+	assert.Equal(t, event.PTP_LOCKED, gm.osClock.State)
 	require.Len(t, rio.messages, 1)
 	assert.Equal(t, ipc.TypeSyncState, rio.messages[0].Type)
 
@@ -440,8 +442,12 @@ func TestUpdateGMState(t *testing.T) {
 		t.Run(tt.desc, func(t *testing.T) {
 			rec := ipcRecorder{}
 			gm := &GM{
-				cfgName:      cfg,
-				sendIPC:      rec.send,
+				BaseClock: BaseClock{
+					cfgName:          cfg,
+					sendIPC:          rec.send,
+					overallSyncState: event.PTP_NOTSET,
+					osClock:          OsClock{State: event.PTP_NOTSET},
+				},
 				getUtcOffset: stubUtcOffset,
 				pmcClient:    &pmc.MockClient{},
 				syncState: SyncState{
@@ -449,7 +455,6 @@ func TestUpdateGMState(t *testing.T) {
 					ClockClass:    protocol.ClockClassUninitialized,
 					ClockAccuracy: fbprotocol.ClockAccuracyUnknown,
 				},
-				overallSyncState: event.PTP_NOTSET,
 			}
 
 			var result SyncState

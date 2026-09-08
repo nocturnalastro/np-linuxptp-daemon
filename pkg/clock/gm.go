@@ -18,14 +18,10 @@ import (
 
 // GM is a Grand Master clock instance.
 type GM struct {
-	cfgName                string
-	sendIPC                func(ipc.Message)
+	BaseClock
 	getUtcOffset           func() int
 	pmcClient              pmc.Client
-	data                   []*event.Data
 	syncState              SyncState
-	overallSyncState       event.PTPState
-	osClockState           event.PTPState
 	gnssState              event.PTPState
 	announcedClockClass    fbprotocol.ClockClass
 	announcedClockAccuracy fbprotocol.ClockAccuracy
@@ -39,13 +35,13 @@ func (c *GM) ClockType() event.ClockType { return event.GM }
 func (c *GM) ClockClass() fbprotocol.ClockClass { return c.syncState.ClockClass }
 
 // ConfigName returns the configuration name.
-func (c *GM) ConfigName() string { return c.cfgName }
 
 // Reset resets the clock state.
 func (c *GM) Reset() {
+	c.BaseClock.Reset()
+
 	c.syncState = SyncState{}
 	c.overallSyncState = event.PTP_FREERUN
-	c.osClockState = event.PTP_NOTSET
 	c.gnssState = event.PTP_NOTSET
 	c.announcedClockClass = 0
 	c.announcedClockAccuracy = 0
@@ -63,7 +59,7 @@ func (c *GM) AddEvent(ev event.Event) SyncState {
 	d.AddEvent(ev)
 	d.UpdateState()
 	clockState := c.updateState()
-	emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState.State, c.osClockState, c.cfgName)
+	emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState.State, c.osClock.State, c.cfgName)
 	c.announceClockClassIfChanged(ev, clockState)
 
 	// Zero NMEA status when GM is not locked
@@ -96,23 +92,6 @@ func (c *GM) AddEvent(ev event.Event) SyncState {
 	debug.UpdateGMState(string(clockState.State))
 
 	return clockState
-}
-
-// GetData returns the Data entry for the given process, creating one if needed.
-func (c *GM) GetData(processName event.EventSource) *event.Data {
-	for _, d := range c.data {
-		if d.ProcessName == processName {
-			return d
-		}
-	}
-	d := &event.Data{ProcessName: processName, State: event.PTP_UNKNOWN, Window: *utils.NewWindow(event.WindowSize)}
-	c.data = append(c.data, d)
-	return d
-}
-
-// ProcessData returns all clock data accumulated from processed events.
-func (c *GM) ProcessData() []*event.Data {
-	return c.data
 }
 
 func (c *GM) announceClockClassIfChanged(ev event.Event, clockState SyncState) {
@@ -201,8 +180,8 @@ func (c *GM) hasNonLeadingDPLLFault(leadingInterface string) bool {
 
 // SystemClockUpdate updates the OS clock state.
 func (c *GM) SystemClockUpdate(osClockState event.PTPState) {
-	c.osClockState = osClockState
-	emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState.State, c.osClockState, c.cfgName)
+	c.osClock.State = osClockState
+	emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState.State, c.osClock.State, c.cfgName)
 }
 
 func (c *GM) updateClockClass(clockClass fbprotocol.ClockClass) {

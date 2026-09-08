@@ -4,22 +4,17 @@ import (
 	fbprotocol "github.com/facebook/time/ptp/protocol"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/event"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/ipc"
-	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/utils"
 )
 
 // BCClock is a simple Boundary Clock instance (no DPLL/ts2phc). It also backs
 // the Ordinary Clock (OC) role, which is a single slave-port time receiver and
 // shares the same state machine; the clockType field records which role it serves.
 type BCClock struct {
-	cfgName          string
-	clockType        event.ClockType
-	sendIPC          func(ipc.Message)
-	iface            string
-	data             []*event.Data
-	syncState        event.PTPState
-	clockClass       fbprotocol.ClockClass
-	overallSyncState event.PTPState
-	osClockState     event.PTPState
+	BaseClock
+	clockType  event.ClockType
+	iface      string
+	syncState  event.PTPState
+	clockClass fbprotocol.ClockClass
 }
 
 // ClockType returns the clock type for this clock (BC or OC).
@@ -32,26 +27,6 @@ func (c *BCClock) ClockType() event.ClockType {
 
 // ClockClass returns the current clock class.
 func (c *BCClock) ClockClass() fbprotocol.ClockClass { return c.clockClass }
-
-// ConfigName returns the configuration name.
-func (c *BCClock) ConfigName() string { return c.cfgName }
-
-// GetData returns the Data entry for the given process, creating one if needed.
-func (c *BCClock) GetData(processName event.EventSource) *event.Data {
-	for _, d := range c.data {
-		if d.ProcessName == processName {
-			return d
-		}
-	}
-	d := &event.Data{ProcessName: processName, State: event.PTP_UNKNOWN, Window: *utils.NewWindow(event.WindowSize)}
-	c.data = append(c.data, d)
-	return d
-}
-
-// ProcessData returns all clock data accumulated from processed events.
-func (c *BCClock) ProcessData() []*event.Data {
-	return c.data
-}
 
 // AddEvent processes an event and updates clock state.
 func (c *BCClock) AddEvent(ev event.Event) SyncState {
@@ -89,7 +64,7 @@ func (c *BCClock) AddEvent(ev event.Event) SyncState {
 			})
 		}
 
-		emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState, c.osClockState, c.cfgName)
+		emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState, c.osClock.State, c.cfgName)
 
 		return SyncState{State: c.syncState, LeadingIFace: event.LEADING_INTERFACE_UNKNOWN}
 	}
@@ -97,12 +72,13 @@ func (c *BCClock) AddEvent(ev event.Event) SyncState {
 
 // SystemClockUpdate updates the OS clock state.
 func (c *BCClock) SystemClockUpdate(osClockState event.PTPState) {
-	c.osClockState = osClockState
-	emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState, c.osClockState, c.cfgName)
+	c.osClock.State = osClockState
+	emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState, c.osClock.State, c.cfgName)
 }
 
 // Reset resets the clock state.
 func (c *BCClock) Reset() {
+	c.BaseClock.Reset()
 	c.syncState = event.PTP_FREERUN
 	c.overallSyncState = event.PTP_FREERUN
 	c.clockClass = 0

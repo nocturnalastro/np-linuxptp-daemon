@@ -14,11 +14,13 @@ import (
 func newTestBCClock() (*BCClock, *ipcRecorder) {
 	rio := &ipcRecorder{}
 	return &BCClock{
-		cfgName:          testPTP4lCfg,
-		sendIPC:          rio.send,
-		syncState:        event.PTP_NOTSET,
-		overallSyncState: event.PTP_NOTSET,
-		osClockState:     event.PTP_NOTSET,
+		BaseClock: BaseClock{
+			cfgName:          testPTP4lCfg,
+			sendIPC:          rio.send,
+			overallSyncState: event.PTP_NOTSET,
+			osClock:          OsClock{State: event.PTP_NOTSET},
+		},
+		syncState: event.PTP_NOTSET,
 	}, rio
 }
 
@@ -76,7 +78,7 @@ func TestBCClock_UpdateOSClockState(t *testing.T) {
 		bc.overallSyncState = event.PTP_LOCKED
 		bc.SystemClockUpdate(event.PTP_FREERUN)
 		assert.Equal(t, event.PTP_FREERUN, bc.overallSyncState)
-		assert.Equal(t, event.PTP_FREERUN, bc.osClockState)
+		assert.Equal(t, event.PTP_FREERUN, bc.osClock.State)
 		require.Len(t, rio.messages, 1)
 		assert.Equal(t, ipc.TypeSyncState, rio.messages[0].Type)
 		assert.Equal(t, ipc.SyncStateValue{State: ipc.StateFreerun}, rio.messages[0].Values)
@@ -174,7 +176,7 @@ func TestBCClock_ClockType(t *testing.T) {
 func TestBCClock_ParentDSUpdate(t *testing.T) {
 	t.Run("updates clock class and emits", func(t *testing.T) {
 		rio := &ipcRecorder{}
-		bc := &BCClock{cfgName: testPTP4lCfg, sendIPC: rio.send}
+		bc := &BCClock{BaseClock: BaseClock{cfgName: testPTP4lCfg, sendIPC: rio.send}}
 
 		parentDS := protocol.ParentDataSet{
 			GrandmasterClockClass: 6,
@@ -189,7 +191,7 @@ func TestBCClock_ParentDSUpdate(t *testing.T) {
 
 	t.Run("unchanged class does not send IPC", func(t *testing.T) {
 		rio := &ipcRecorder{}
-		bc := &BCClock{cfgName: testPTP4lCfg, sendIPC: rio.send, clockClass: fbprotocol.ClockClass(6)}
+		bc := &BCClock{BaseClock: BaseClock{cfgName: testPTP4lCfg, sendIPC: rio.send}, clockClass: fbprotocol.ClockClass(6)}
 
 		parentDS := protocol.ParentDataSet{
 			GrandmasterClockClass: 6,
