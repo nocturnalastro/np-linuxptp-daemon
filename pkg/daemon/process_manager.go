@@ -91,7 +91,6 @@ func (pm *ProcessManager) startOne(ctx context.Context, p process.Process) {
 		if profile := p.Profile(); profile != nil {
 			pm.daemon.pluginManager.AfterRunPTPCommand(profile, p.Name())
 		}
-		// ts2phc start is now driven by conditions, not by explicit event emission
 	}
 	if syncer, ok := p.(initialStateSyncer); ok {
 		syncer.SyncInitialState()
@@ -138,10 +137,10 @@ func (pm *ProcessManager) forwardEvents(ctx context.Context) {
 			if isPS && ps.Status == PtpProcessDown {
 				pm.handleProcessDown(ctx, ev)
 			}
-			pm.evalActions(ctx, ev)
 			if !isPS {
 				pm.eventsOut <- ev
 			}
+			pm.evalActions(ctx, ev)
 		}
 	}
 }
@@ -153,16 +152,7 @@ func waitingOnCondition(p process.Process) bool {
 	case process.Stopping, process.Stopped, process.Dead:
 		return nil != process.GetCondition(p, process.ActionRestart, nil)
 	case process.Starting, process.Running:
-		if nil != process.GetCondition(p, process.ActionStop, nil) {
-			return true
-		}
-
-		if enabler, ok := p.(process.Enabler); !ok {
-			return false
-		} else if enabler.IsEnabled() {
-			return nil != process.GetCondition(p, process.ActionDisable, nil)
-		}
-		return nil != process.GetCondition(p, process.ActionEnable, nil)
+		return nil != process.GetCondition(p, process.ActionStop, nil)
 	}
 	return false
 }
@@ -206,6 +196,10 @@ func (pm *ProcessManager) collectWindowRequests() []process.WindowRequest {
 }
 
 func (pm *ProcessManager) evalActions(ctx context.Context, ev event.Event) {
+	if len(pm.waitingProcess) == 0 {
+		return
+	}
+
 	var stats process.EventStats
 	if pm.clockMgr != nil {
 		windowRequests := pm.collectWindowRequests()
@@ -242,25 +236,6 @@ func (pm *ProcessManager) evalActions(ctx context.Context, ev event.Event) {
 				glog.V(2).Infof("ProcessManager: stop condition met for %s (%s) on source=%s", p.Name(), cond, ev.Source)
 				p.Stop()
 				hasChanged = true
-				continue
-			}
-			enabler, ok := p.(process.Enabler)
-			if !ok {
-				continue
-			}
-			if enabler.IsEnabled() {
-				if cond := process.GetCondition(p, process.ActionDisable, process.Never{}); cond.Met(p, ev, stats) {
-					glog.V(2).Infof("ProcessManager: disable condition met for %s (%s) on source=%s", p.Name(), cond, ev.Source)
-					enabler.Disable()
-					hasChanged = true
-				}
-				continue
-			}
-			if cond := process.GetCondition(p, process.ActionEnable, process.Never{}); cond.Met(p, ev, stats) {
-				glog.V(2).Infof("ProcessManager: enable condition met for %s (%s) on source=%s", p.Name(), cond, ev.Source)
-				enabler.Enable()
-				hasChanged = true
-				continue
 			}
 		}
 	}
@@ -276,6 +251,14 @@ func (pm *ProcessManager) handleProcessDown(ctx context.Context, ev event.Event)
 			ev.Source, ev.CfgName, ev.IFace)
 		return
 	}
+
+	switch p.State() {
+	case process.Running:
+		UpdateProcessStatusMetrics(p.Name(), p.ConfigName(), PtpProcessUp)
+	case process.Stopped, process.Dead:
+		UpdateProcessStatusMetrics(p.Name(), p.ConfigName(), PtpProcessDown)
+	}
+
 	if p.State() != process.Dead {
 		glog.V(2).Infof("ProcessManager: process_status down ignored for %s state=%s source=%s",
 			p.Name(), p.State(), ev.Source)
