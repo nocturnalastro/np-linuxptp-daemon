@@ -206,6 +206,10 @@ func (pm *ProcessManager) collectWindowRequests() []process.WindowRequest {
 }
 
 func (pm *ProcessManager) evalActions(ctx context.Context, ev event.Event) {
+	if len(pm.waitingProcess) == 0 {
+		return
+	}
+
 	var stats process.EventStats
 	if pm.clockMgr != nil {
 		windowRequests := pm.collectWindowRequests()
