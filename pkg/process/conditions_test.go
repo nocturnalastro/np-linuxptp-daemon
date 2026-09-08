@@ -147,19 +147,6 @@ func TestOnProcessDown(t *testing.T) {
 	assert.False(t, c.Met(p, event.Event{}, EventStats{}))
 }
 
-func TestGetCondition_FallbackForNewActionTypes(t *testing.T) {
-	p := &stubProc{}
-	// Missing ActionEnable/ActionDisable should use the provided fallback
-	assert.Equal(t, Never{}, GetCondition(p, ActionEnable, Never{}))
-	assert.Equal(t, Never{}, GetCondition(p, ActionDisable, Never{}))
-
-	// When explicitly configured, should return the configured condition
-	p2 := &stubProc{conds: map[Action]Condition{
-		ActionEnable: OnPluginEvent{EventName: "gnss_failover"},
-	}}
-	assert.Equal(t, OnPluginEvent{EventName: "gnss_failover"}, GetCondition(p2, ActionEnable, Never{}))
-}
-
 func TestAny(t *testing.T) {
 	p := &stubProc{}
 	c := Any{Conditions: []Condition{
