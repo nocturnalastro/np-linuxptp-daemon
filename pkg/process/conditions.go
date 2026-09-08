@@ -124,7 +124,6 @@ type OnStateAndOffsetForCount struct {
 // It returns true when the event's config and state match, and enough recent samples
 // in the offset window show magnitude below MaxOffset.
 func (c OnStateAndOffsetForCount) Met(p Process, ev event.Event, stats EventStats) bool {
-	glog.Infof("ProcessManager: %s: recivied event %v+", c, ev)
 	if eventEmpty(ev) {
 		return false
 	}
@@ -137,32 +136,26 @@ func (c OnStateAndOffsetForCount) Met(p Process, ev event.Event, stats EventStat
 		return false
 	}
 	if c.Source != "" && c.Source != ev.Source {
-		glog.Infof("ProcessManager: %s: incorrect source", c, ev.Source)
 		condLog(p, c, false, fmt.Sprintf("source want=%s got=%s", c.Source, ev.Source))
 		return false
 	}
 	data, ok := eventPTPState(ev.Data)
 	if !ok {
-		glog.Infof("ProcessManager: %s: No Stat found", c)
 		condLog(p, c, false, "event has no PTP state")
 		return false
 	}
 	if c.State != data {
 		condLog(p, c, false, fmt.Sprintf("state want=%s got=%s", c.State, data))
-		glog.Infof("ProcessManager: %s: Incorrect State got %s", c, data)
 		return false
 	}
 	w := stats[c.ClockID][c.Source]
 	if w == nil {
-		glog.Infof("ProcessManager: %s: Failed to find Window: %v+", c, stats[c.ClockID])
 		condLog(p, c, false, "no offset window")
 		return false
 	}
 	nSamples := w.CountSamples(func(x float64) bool {
 		return math.Abs(x) < c.MaxOffset
 	})
-
-	glog.Infof("ProcessManager: %s sampleCount: %d", c, nSamples)
 
 	met := nSamples > c.Count
 	condLog(p, c, met, fmt.Sprintf("window_samples=%d need>%d", nSamples, c.Count))

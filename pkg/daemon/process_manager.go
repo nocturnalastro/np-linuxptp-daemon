@@ -42,7 +42,6 @@ func (pm *ProcessManager) findProcessesByName(name string) []process.Process {
 
 func startProcessWithRetry(ctx context.Context, p process.Process, timeout time.Duration) error {
 	timeoutCh := time.After(timeout)
-	glog.Infof("ProcessManager: calling Start on %s state=%s", p.Name(), p.State())
 	var lastErr error
 	for retryCount := 0; ; retryCount++ {
 		select {
@@ -128,11 +127,11 @@ func (pm *ProcessManager) forwardEvents(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			glog.V(2).Info("ProcessManager: event forwarder stopped (context cancelled)")
+			glog.V(20).Info("ProcessManager: event forwarder stopped (context cancelled)")
 			return
 		case ev, ok := <-pm.eventsIn:
 			if !ok {
-				glog.V(2).Info("ProcessManager: event forwarder stopped (inbound closed)")
+				glog.V(20).Info("ProcessManager: event forwarder stopped (inbound closed)")
 				return
 			}
 			ps, isPS := ev.Data.(*event.ProcessStatusData)

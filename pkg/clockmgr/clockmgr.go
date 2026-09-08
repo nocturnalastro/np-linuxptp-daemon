@@ -117,16 +117,12 @@ func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[st
 	m.clockManagementMu.Lock()
 	defer m.clockManagementMu.Unlock()
 
-	glog.Infof("ProcessManager: windowRequests %v+", windowRequests)
-
 	out := make(map[string]map[event.EventSource]*utils.Window)
 	for _, req := range windowRequests {
-		glog.Infof("ProcessManager: Looking for window for clockID=%s source=%s", req.ClockID, req.Source)
 		clk := m.GetClock(req.ClockID)
 		if clk == nil {
 			continue
 		}
-		glog.Infof("ProcessManager: Found clock with ID %s", req.ClockID)
 		if _, ok := out[req.ClockID]; !ok {
 			out[req.ClockID] = map[event.EventSource]*utils.Window{}
 		}
@@ -135,11 +131,9 @@ func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[st
 		// requests for the same clock but different event source can be done in one go
 		for _, d := range clk.ProcessData() {
 			if d == nil {
-				glog.Infof("ProcessManager: skipping No-data")
 				continue
 			}
 			if d.ProcessName == req.Source {
-				glog.Infof("ProcessManager: Matched source %s", d.ProcessName)
 				out[req.ClockID][req.Source] = &d.Window
 			}
 		}
