@@ -101,9 +101,6 @@ func (pm *ProcessManager) startOne(ctx context.Context, p process.Process) {
 
 // StartProcesses initiates the event forwarding and starts processes with Immediate conditions.
 func (pm *ProcessManager) StartProcesses(ctx context.Context) {
-	pm.forwardOnce.Do(func() {
-		go pm.forwardEvents(ctx)
-	})
 	immediate := process.Immediate{}
 
 	pm.forEachProcess(func(p process.Process) {
@@ -118,6 +115,10 @@ func (pm *ProcessManager) StartProcesses(ctx context.Context) {
 		glog.Infof("ProcessManager: waiting to start %s until %s", p.Name(), cond)
 	})
 	pm.waitingProcess = pm.getWaitingProcesses()
+
+	pm.forwardOnce.Do(func() {
+		go pm.forwardEvents(ctx)
+	})
 }
 
 func (pm *ProcessManager) forwardEvents(ctx context.Context) {

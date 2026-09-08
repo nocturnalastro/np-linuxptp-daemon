@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 
 	"github.com/golang/glog"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/event"
@@ -123,9 +124,11 @@ type OnStateAndOffsetForCount struct {
 // It returns true when the event's config and state match, and enough recent samples
 // in the offset window show magnitude below MaxOffset.
 func (c OnStateAndOffsetForCount) Met(p Process, ev event.Event, stats EventStats) bool {
+	glog.Infof("ProcessManager: %s: recivied event %v+", c, ev)
 	if eventEmpty(ev) {
 		return false
 	}
+
 	related := ev.CfgName == c.ConfigName || (c.Source != "" && c.Source == ev.Source)
 	if c.ConfigName == "" || c.ConfigName != ev.CfgName {
 		if related {
@@ -134,26 +137,33 @@ func (c OnStateAndOffsetForCount) Met(p Process, ev event.Event, stats EventStat
 		return false
 	}
 	if c.Source != "" && c.Source != ev.Source {
+		glog.Infof("ProcessManager: %s: incorrect source", c, ev.Source)
 		condLog(p, c, false, fmt.Sprintf("source want=%s got=%s", c.Source, ev.Source))
 		return false
 	}
 	data, ok := eventPTPState(ev.Data)
 	if !ok {
+		glog.Infof("ProcessManager: %s: No Stat found", c)
 		condLog(p, c, false, "event has no PTP state")
 		return false
 	}
 	if c.State != data {
 		condLog(p, c, false, fmt.Sprintf("state want=%s got=%s", c.State, data))
+		glog.Infof("ProcessManager: %s: Incorrect State got %s", c, data)
 		return false
 	}
 	w := stats[c.ClockID][c.Source]
 	if w == nil {
+		glog.Infof("ProcessManager: %s: Failed to find Window: %v+", c, stats[c.ClockID])
 		condLog(p, c, false, "no offset window")
 		return false
 	}
 	nSamples := w.CountSamples(func(x float64) bool {
 		return math.Abs(x) < c.MaxOffset
 	})
+
+	glog.Infof("ProcessManager: %s sampleCount: %d", c, nSamples)
+
 	met := nSamples > c.Count
 	condLog(p, c, met, fmt.Sprintf("window_samples=%d need>%d", nSamples, c.Count))
 	return met
@@ -249,12 +259,15 @@ func (c OnProcessUp) GetWindowRequests() []WindowRequest {
 type All struct {
 	Conditions []Condition
 	met        map[int]bool // Track which child conditions have been true (private field)
+	mu         sync.RWMutex
 }
 
 // Met implements the Condition interface for All.
 // It returns true only when all nested conditions have been true at some point (stateful).
 // Resets tracking on reset events or after returning true.
 func (c *All) Met(p Process, ev event.Event, stats EventStats) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// Reset tracking if this is a reset event
 	if ev.Reset {
 		c.met = make(map[int]bool, len(c.Conditions))
@@ -295,6 +308,8 @@ func (c *All) Met(p Process, ev event.Event, stats EventStats) bool {
 
 // String returns the string representation of All.
 func (c *All) String() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	parts := make([]string, 0, len(c.Conditions))
 	for i, cond := range c.Conditions {
 		if cond == nil {
@@ -311,7 +326,7 @@ func (c *All) String() string {
 }
 
 // GetWindowRequests ...
-func (c All) GetWindowRequests() []WindowRequest {
+func (c *All) GetWindowRequests() []WindowRequest {
 	seen := make(map[WindowRequest]bool)
 	var result []WindowRequest
 	for _, cond := range c.Conditions {

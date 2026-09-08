@@ -107,6 +107,7 @@ func (d *Data) AddEvent(event Event) {
 			state = PTP_FREERUN
 		}
 	case *OffsetData:
+		glog.Infof("ProcessManager: Data.AddEvent %s, %v+", d, event)
 		state = data.State
 		sourceLost = data.SourceLost
 		offset = data.Offset

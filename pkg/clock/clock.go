@@ -34,24 +34,24 @@ type SyncState struct {
 	ClockOffset    int64
 }
 
-func newBaseClock(cfgName string, sendIPC func(ipc.Message)) BaseClock {
+func newBaseClock(cfgName string, sendIPC func(ipc.Message), osClock *OsClock) BaseClock {
 	return BaseClock{
 		cfgName:          cfgName,
 		sendIPC:          sendIPC,
 		overallSyncState: event.PTP_NOTSET,
-		osClock:          OsClock{State: event.PTP_NOTSET},
+		osClock:          osClock,
 	}
 }
 
 // NewClock creates the appropriate Clock implementation for the given clock type.
-func NewClock(cfgName string, clockType event.ClockType, sendIPC func(ipc.Message), sendEvent func(event.Event), getUtcOffset func() int, pmcClient pmc.Client) (Clock, error) {
+func NewClock(cfgName string, clockType event.ClockType, sendIPC func(ipc.Message), sendEvent func(event.Event), getUtcOffset func() int, pmcClient pmc.Client, osClock *OsClock) (Clock, error) {
 	switch clockType {
 	case event.GM:
 		if pmcClient == nil {
 			return nil, fmt.Errorf("pmc.Client is required for clock type %s (config %s)", clockType, cfgName)
 		}
 		return &GM{
-			BaseClock:    newBaseClock(cfgName, sendIPC),
+			BaseClock:    newBaseClock(cfgName, sendIPC, osClock),
 			getUtcOffset: getUtcOffset,
 			pmcClient:    pmcClient,
 			syncState: SyncState{
@@ -68,7 +68,7 @@ func NewClock(cfgName string, clockType event.ClockType, sendIPC func(ipc.Messag
 			return nil, fmt.Errorf("pmc.Client is required for clock type %s (config %s)", clockType, cfgName)
 		}
 		return &TBC{
-			BaseClock:    newBaseClock(cfgName, sendIPC),
+			BaseClock:    newBaseClock(cfgName, sendIPC, osClock),
 			sendEvent:    sendEvent,
 			getUtcOffset: getUtcOffset,
 			pmcClient:    pmcClient,
@@ -84,7 +84,7 @@ func NewClock(cfgName string, clockType event.ClockType, sendIPC func(ipc.Messag
 		// OC (single slave port) and BC share the same state machine; the
 		// clockType is preserved so metrics and events report the correct role.
 		return &BCClock{
-			BaseClock: newBaseClock(cfgName, sendIPC),
+			BaseClock: newBaseClock(cfgName, sendIPC, osClock),
 			clockType: clockType,
 			syncState: event.PTP_NOTSET,
 		}, nil

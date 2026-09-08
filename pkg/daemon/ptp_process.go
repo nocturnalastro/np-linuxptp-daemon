@@ -1240,12 +1240,14 @@ func phc2sysOffsetStartCondition(env ptpProcessEnv) process.Condition {
 		return base
 	}
 	if len(cfgs) == 1 {
+		base.ClockID = cfgs[0]
 		base.ConfigName = cfgs[0]
 		return base
 	}
 	conds := make([]process.Condition, 0, len(cfgs))
 	for _, cfg := range cfgs {
 		c := base
+		c.ClockID = cfg
 		c.ConfigName = cfg
 		conds = append(conds, c)
 	}
@@ -1316,42 +1318,55 @@ func NewTs2phcProcess(env ptpProcessEnv) (*ptpProcess, error) {
 	p.cmd = buildCmd(buildPtpCmdLine(ts2phcProcessName, configPath, opts, env.nodeProfile))
 	if profileClockType(env.nodeProfile) == TBC && env.dn != nil {
 		if p.conditions == nil {
-			p.conditions = map[process.Action]process.Condition{}
+			p.conditions = ts2phcConditions(p, env)
 		}
-
-		// Build ts2phc start condition: ptp4l locked with stable offset, and (if configured) phc2sys locked with stable offset
-		ptp4lConfigName := fmt.Sprintf("ptp4l.%d.config", env.runID)
-		offsetThreshold := int64(1e9) // nanoseconds (same as current default)
-		offsetSampleCount := 3        // same sample count as used currently
-
-		conditions := []process.Condition{
-			&process.OnStateAndOffsetForCount{
-				ClockID:    ptp4lConfigName,
-				ConfigName: ptp4lConfigName,
-				Source:     event.PTP4l,
-				State:      event.PTP_LOCKED,
-				MaxOffset:  float64(offsetThreshold),
-				Count:      offsetSampleCount,
-			},
-		}
-
-		// Add phc2sys dependency only if configured (single phc2sys per node, including HA)
-		// p.haProfile is already set at this point from ApplyHaProfiles
-		if shouldWaitForPhc2sys(env.nodeProfile, p.haProfile) {
-			phc2sysConfigName := "phc2sys.0.config" // There is only one phc2sys per node
-			conditions = append(conditions, &process.OnStateAndOffsetForCount{
-				ClockID:    ptp4lConfigName,
-				ConfigName: phc2sysConfigName,
-				Source:     event.PHC2SYS,
-				State:      event.PTP_LOCKED,
-				MaxOffset:  float64(offsetThreshold),
-				Count:      offsetSampleCount,
-			})
-		}
-
-		p.conditions[process.ActionStart] = &process.All{Conditions: conditions}
 	}
 	return p, nil
+}
+
+func ts2phcConditions(p *ptpProcess, env ptpProcessEnv) map[process.Action]process.Condition {
+	conditions := map[process.Action]process.Condition{}
+
+	// Build ts2phc start condition: ptp4l locked with stable offset, and (if configured) phc2sys locked with stable offset
+	ptp4lConfigName := fmt.Sprintf("ptp4l.%d.config", env.runID)
+	offsetThreshold := int64(1e9) // nanoseconds (same as current default)
+	offsetSampleCount := 3        // same sample count as used currently
+
+	startConditions := []process.Condition{
+		&process.OnStateAndOffsetForCount{
+			ClockID:    ptp4lConfigName,
+			ConfigName: ptp4lConfigName,
+			Source:     event.PTP4l,
+			State:      event.PTP_LOCKED,
+			MaxOffset:  float64(offsetThreshold),
+			Count:      offsetSampleCount,
+		},
+	}
+
+	// Add phc2sys dependency only if configured (single phc2sys per node, including HA)
+	// p.haProfile is already set at this point from ApplyHaProfiles
+	if shouldWaitForPhc2sys(env.nodeProfile, p.haProfile) {
+		cfgName := fmt.Sprintf("ptp4l.%d.config", env.runID)
+		var haConfigs []string
+		if env.dn != nil {
+			haConfigs = env.dn.haLinkedPtp4lConfigNames(env.nodeProfile)
+		}
+		if len(haConfigs) != 0 {
+			cfgName = fmt.Sprintf("phc2sys.%d.config", env.runID)
+		}
+
+		startConditions = append(startConditions, &process.OnStateAndOffsetForCount{
+			ClockID:    ptp4lConfigName,
+			ConfigName: cfgName,
+			Source:     event.PHC2SYS,
+			State:      event.PTP_LOCKED,
+			MaxOffset:  float64(offsetThreshold),
+			Count:      offsetSampleCount,
+		})
+	}
+
+	conditions[process.ActionStart] = &process.All{Conditions: startConditions}
+	return conditions
 }
 
 // NewSyncEProcess creates a new synce process instance.
@@ -1377,7 +1392,7 @@ func NewSyncEProcess(env ptpProcessEnv) (*ptpProcess, error) {
 
 // NewChronydProcess creates a new chronyd process instance.
 func NewChronydProcess(env ptpProcessEnv) (*chronydProcess, error) {
-	if env.hasFailover {
+	if !env.hasFailover {
 		return nil, fmt.Errorf("chronyd process only needed when we have ntpFailover")
 	}
 

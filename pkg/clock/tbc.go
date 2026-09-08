@@ -109,6 +109,7 @@ func (c *TBC) AddEvent(ev event.Event) SyncState {
 		}
 		return c.syncState
 	default:
+		glog.Infof("ProcessManager: TBC.AddEvent %v+", ev)
 		d := c.GetData(ev.Source)
 		d.AddEvent(ev)
 		d.UpdateState()

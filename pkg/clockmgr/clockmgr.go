@@ -87,7 +87,7 @@ func Init(nodeName string, processChannel chan event.Event, offsetMetric *promet
 // pmcClient may be nil for clock types that do not use PMC (e.g. BC, OC).
 // leadingInterface is only used for TBC clocks; pass "" for other types.
 func (m *ClockManager) AddClock(cfgName string, clockType event.ClockType, pmcClient pmc.Client, leadingInterface string) (clock.Clock, error) {
-	clk, err := clock.NewClock(cfgName, clockType, m.sendIPC, m.sendEvent, m.GetUtcOffset, pmcClient)
+	clk, err := clock.NewClock(cfgName, clockType, m.sendIPC, m.sendEvent, m.GetUtcOffset, pmcClient, &m.osClock)
 	if err != nil {
 		return nil, err
 	}
@@ -117,13 +117,16 @@ func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[st
 	m.clockManagementMu.Lock()
 	defer m.clockManagementMu.Unlock()
 
+	glog.Infof("ProcessManager: windowRequests %v+", windowRequests)
+
 	out := make(map[string]map[event.EventSource]*utils.Window)
 	for _, req := range windowRequests {
+		glog.Infof("ProcessManager: Looking for window for clockID=%s source=%s", req.ClockID, req.Source)
 		clk := m.GetClock(req.ClockID)
 		if clk == nil {
 			continue
 		}
-
+		glog.Infof("ProcessManager: Found clock with ID %s", req.ClockID)
 		if _, ok := out[req.ClockID]; !ok {
 			out[req.ClockID] = map[event.EventSource]*utils.Window{}
 		}
@@ -132,9 +135,11 @@ func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[st
 		// requests for the same clock but different event source can be done in one go
 		for _, d := range clk.ProcessData() {
 			if d == nil {
+				glog.Infof("ProcessManager: skipping No-data")
 				continue
 			}
 			if d.ProcessName == req.Source {
+				glog.Infof("ProcessManager: Matched source %s", d.ProcessName)
 				out[req.ClockID][req.Source] = &d.Window
 			}
 		}
@@ -185,14 +190,15 @@ func (m *ClockManager) GetUtcOffset() int {
 // handleOSClockEvent fans out a PHC2SYS/CHRONYD event to all clocks, emits os_clock_state message once, and emits
 // a sync_state message per-profile when the overall state changes.
 func (m *ClockManager) handleOSClockEvent(ev event.Event) {
-	prevClockState := m.osClock
+	prevClockState := m.osClock.State
 	ptp, ok := ev.Data.(*event.OffsetData)
 	if !ok {
 		glog.Warningf("handleOSClockEvent: received unexpected event")
 		return
 	}
+	m.osClock.AddEvent(ev)
 	m.osClock.State = ptp.State
-	if m.osClock == prevClockState {
+	if m.osClock.State == prevClockState {
 		return
 	}
 
@@ -214,6 +220,7 @@ func (m *ClockManager) ProcessEvents(ctx context.Context) {
 	for {
 		select {
 		case ev, ok := <-m.events:
+
 			if !ok {
 				return
 			}

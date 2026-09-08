@@ -18,7 +18,7 @@ func newTestBCClock() (*BCClock, *ipcRecorder) {
 			cfgName:          testPTP4lCfg,
 			sendIPC:          rio.send,
 			overallSyncState: event.PTP_NOTSET,
-			osClock:          OsClock{State: event.PTP_NOTSET},
+			osClock:          &OsClock{State: event.PTP_NOTSET},
 		},
 		syncState: event.PTP_NOTSET,
 	}, rio

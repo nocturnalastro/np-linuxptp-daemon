@@ -70,7 +70,7 @@ func newPMCTestTBCClock(pmcClient pmc.Client) *TBC {
 		BaseClock: BaseClock{
 			sendIPC:          rec.send,
 			overallSyncState: event.PTP_NOTSET,
-			osClock:          OsClock{State: event.PTP_NOTSET},
+			osClock:          &OsClock{State: event.PTP_NOTSET},
 		},
 		sendEvent:        func(event.Event) {},
 		getUtcOffset:     stubUtcOffset,
@@ -1094,7 +1094,7 @@ func newLockedTBCClock() (*TBC, *ipcRecorder) {
 			cfgName:          testTS2PHCCfg,
 			sendIPC:          rec.send,
 			overallSyncState: event.PTP_NOTSET,
-			osClock:          OsClock{State: event.PTP_NOTSET},
+			osClock:          &OsClock{State: event.PTP_NOTSET},
 		},
 		sendEvent:        func(event.Event) {},
 		getUtcOffset:     stubUtcOffset,

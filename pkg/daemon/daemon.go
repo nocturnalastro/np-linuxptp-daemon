@@ -1076,16 +1076,15 @@ func (dn *Daemon) haLinkedPtp4lConfigNames(nodeProfile *ptpv1.PtpProfile) []stri
 	var cfgs []string
 	for _, profileName := range listHaProfiles(nodeProfile) {
 		for _, proc := range dn.processManager.process {
-			ptp, ok := proc.(*ptpProcess)
-			if !ok || ptp.Name() != ptp4lProcessName {
+			if proc.Name() != ptp4lProcessName {
 				continue
 			}
-			profile := ptp.Profile()
+			profile := proc.Profile()
 			if profile == nil || profile.Name == nil || *profile.Name != profileName {
 				continue
 			}
-			if ptp.configName != "" {
-				cfgs = append(cfgs, ptp.configName)
+			if cfg := proc.ConfigName(); cfg != "" {
+				cfgs = append(cfgs, cfg)
 			}
 			break
 		}
