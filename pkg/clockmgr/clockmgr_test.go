@@ -32,11 +32,6 @@ func (m *ClockManager) GetPTPState(source event.EventSource, cfgName string) eve
 	return d.State
 }
 
-// IPCCache returns the IPC cache, or nil if not configured.
-func (m *ClockManager) IPCCache() *ipc.Cache {
-	return m.ipcCache
-}
-
 func TestClockManager_GetDataAndPTPState(t *testing.T) {
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
 	_, err := cm.AddClock("ts2phc.0.config", event.OC, nil, "")
@@ -50,9 +45,9 @@ func TestClockManager_GetDataAndPTPState(t *testing.T) {
 		Source:  event.TS2PHC,
 		CfgName: "ts2phc.0.config",
 		IFace:   testClockmgrETH0,
-		Data: &event.PTPData{
+		Data: &event.OffsetData{
 			State:  event.PTP_LOCKED,
-			Values: map[event.ValueType]interface{}{event.OFFSET: int64(100)},
+			Offset: 100,
 		},
 	}
 	d.AddEvent(ev)
@@ -65,7 +60,6 @@ func TestClockManager_GetDataAndPTPState(t *testing.T) {
 func TestClockManager_EmitClockClassAndIPCCache(t *testing.T) {
 	cache := ipc.NewCache(10)
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, cache)
-	assert.Equal(t, cache, cm.IPCCache())
 
 	clk, err := cm.AddClock(testClockmgrPtp4lConfig, event.OC, nil, "")
 	require.NoError(t, err)
@@ -99,13 +93,13 @@ func TestClockManager_GetWindowsPrefersMatchingProcess(t *testing.T) {
 		Source:  event.PTP4l,
 		CfgName: testClockmgrPtp4lConfig,
 		IFace:   testClockmgrETH0,
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(10)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 10},
 	}
 	ts2phcEv := event.Event{
 		Source:  event.TS2PHC,
 		CfgName: "ts2phc.0.config",
 		IFace:   testClockmgrETH0,
-		Data:    &event.PTPData{State: event.PTP_LOCKED, Values: map[event.ValueType]interface{}{event.OFFSET: int64(99)}},
+		Data:    &event.OffsetData{State: event.PTP_LOCKED, Offset: 99},
 	}
 	// AddEvent only records the offset window after the iface already exists.
 	cm.GetClock(testClockmgrPtp4lConfig).GetData(event.PTP4l).AddEvent(ptp4lEv)
@@ -130,7 +124,7 @@ func TestClockManager_SetTBCLeadingInterface(t *testing.T) {
 		Source:  event.PTP4l,
 		CfgName: "ptp4l.1.config",
 		IFace:   "ens1f1",
-		Data:    &event.PTPData{State: event.PTP_FREERUN, Values: map[event.ValueType]interface{}{event.OFFSET: int64(49880)}},
+		Data:    &event.OffsetData{State: event.PTP_FREERUN, Offset: 49880},
 	})
 	assert.Equal(t, "ens1f0", state.LeadingIFace)
 }
