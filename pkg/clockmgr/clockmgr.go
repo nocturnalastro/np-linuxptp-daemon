@@ -16,6 +16,7 @@ import (
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/leap"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/parser"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/pmc"
+	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/process"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -87,10 +88,13 @@ func Init(nodeName string, processChannel chan event.Event, offsetMetric *promet
 // AddClock creates a Clock for the given config and registers it.
 // If a clock is already registered for cfgName it is replaced.
 // pmcClient may be nil for clock types that do not use PMC (e.g. BC, OC).
-func (m *ClockManager) AddClock(cfgName string, clockType event.ClockType, pmcClient pmc.Client) (clock.Clock, error) {
+func (m *ClockManager) AddClock(cfgName string, clockType event.ClockType, pmcClient pmc.Client, leadingInterface string) (clock.Clock, error) {
 	clk, err := clock.NewClock(cfgName, clockType, m.sendIPC, m.sendEvent, m.GetUtcOffset, pmcClient)
 	if err != nil {
 		return nil, err
+	}
+	if tbc, ok := clk.(*clock.TBC); ok && leadingInterface != "" {
+		tbc.SetConfiguredLeadingInterface(leadingInterface)
 	}
 	m.clockManagementMu.Lock()
 	defer m.clockManagementMu.Unlock()
@@ -106,6 +110,34 @@ func (m *ClockManager) AddClock(cfgName string, clockType event.ClockType, pmcCl
 	}
 	glog.Infof("AddClock: registered %s clock for config %s", clockType, cfgName)
 	return clk, nil
+}
+
+// GetWindows returns offset sample windows requested by process conditions.
+func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[string]map[event.EventSource]*utils.Window {
+	m.clockManagementMu.Lock()
+	defer m.clockManagementMu.Unlock()
+
+	out := make(map[string]map[event.EventSource]*utils.Window)
+	for _, req := range windowRequests {
+		clk := m.GetClock(req.ClockID)
+		if clk == nil {
+			continue
+		}
+
+		if _, ok := out[req.ClockID]; !ok {
+			out[req.ClockID] = map[event.EventSource]*utils.Window{}
+		}
+
+		for _, d := range clk.ProcessData() {
+			if d == nil {
+				continue
+			}
+			if d.ProcessName == req.Source {
+				out[req.ClockID][req.Source] = &d.Window
+			}
+		}
+	}
+	return out
 }
 
 // RemoveAllClocks tears down all registered clocks and cleans up associated state.

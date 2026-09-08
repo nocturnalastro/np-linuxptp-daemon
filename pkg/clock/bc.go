@@ -36,7 +36,8 @@ func (c *BCClock) ClockClass() fbprotocol.ClockClass { return c.clockClass }
 // ConfigName returns the configuration name.
 func (c *BCClock) ConfigName() string { return c.cfgName }
 
-func (c *BCClock) getData(processName event.EventSource) *event.Data {
+// GetData returns the Data entry for the given process, creating one if needed.
+func (c *BCClock) GetData(processName event.EventSource) *event.Data {
 	for _, d := range c.data {
 		if d.ProcessName == processName {
 			return d
@@ -45,6 +46,11 @@ func (c *BCClock) getData(processName event.EventSource) *event.Data {
 	d := &event.Data{ProcessName: processName, State: event.PTP_UNKNOWN, Window: *utils.NewWindow(event.WindowSize)}
 	c.data = append(c.data, d)
 	return d
+}
+
+// ProcessData returns all clock data accumulated from processed events.
+func (c *BCClock) ProcessData() []*event.Data {
+	return c.data
 }
 
 // AddEvent processes an event and updates clock state.
@@ -57,7 +63,7 @@ func (c *BCClock) AddEvent(ev event.Event) SyncState {
 		}
 		return SyncState{State: c.syncState, LeadingIFace: event.LEADING_INTERFACE_UNKNOWN}
 	default:
-		d := c.getData(ev.Source)
+		d := c.GetData(ev.Source)
 		d.AddEvent(ev)
 		d.UpdateState()
 
