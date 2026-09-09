@@ -18,7 +18,7 @@ const (
 )
 
 // EventStats ...
-type EventStats map[string]map[event.EventSource]*utils.Window
+type EventStats map[string]map[event.EventSource]utils.ROWindow
 
 // WindowRequest ...
 type WindowRequest struct {

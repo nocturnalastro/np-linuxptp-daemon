@@ -12,6 +12,21 @@ import (
 	"gonum.org/v1/gonum/stat"
 )
 
+type ROWindow interface {
+	AbsMax() float64
+	Max() float64
+	AbsMin() float64
+	Min() float64
+	AbsMean() float64
+	Mean() float64
+	Median() float64
+	Variance() float64
+	LastInserted() float64
+	CountSamples(condition func(float64) bool) int
+	IsFull() bool
+	IsEmpty() bool
+}
+
 // Window represents a sliding window of float64 values with associated weights.
 // It supports various statistical operations on the windowed data.
 type Window struct {

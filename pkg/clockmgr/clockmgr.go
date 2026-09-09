@@ -113,18 +113,18 @@ func (m *ClockManager) AddClock(cfgName string, clockType event.ClockType, pmcCl
 // GetWindows returns offset sample windows keyed by clock config name.
 // If requiredStatsConfigs is empty, all windows are returned.
 // Otherwise, only windows for configs in requiredStatsConfigs are returned.
-func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[string]map[event.EventSource]*utils.Window {
+func (m *ClockManager) GetWindows(windowRequests []process.WindowRequest) map[string]map[event.EventSource]utils.ROWindow {
 	m.clockManagementMu.Lock()
 	defer m.clockManagementMu.Unlock()
 
-	out := make(map[string]map[event.EventSource]*utils.Window)
+	out := make(map[string]map[event.EventSource]utils.ROWindow)
 	for _, req := range windowRequests {
 		clk := m.GetClock(req.ClockID)
 		if clk == nil {
 			continue
 		}
 		if _, ok := out[req.ClockID]; !ok {
-			out[req.ClockID] = map[event.EventSource]*utils.Window{}
+			out[req.ClockID] = map[event.EventSource]utils.ROWindow{}
 		}
 
 		// TODO: We might want to process the requests and group them in the future so
