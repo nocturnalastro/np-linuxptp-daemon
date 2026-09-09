@@ -680,8 +680,7 @@ func (c *TBC) SetConfiguredLeadingInterface(iface string) {
 }
 
 // SystemClockUpdate updates the OS clock state.
-func (c *TBC) SystemClockUpdate(osClockState event.PTPState) {
-	c.osClock.State = osClockState
+func (c *TBC) SystemClockUpdate() {
 	profile := strings.Replace(c.cfgName, "ts2phc", "ptp4l", 1)
 	emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState.State, c.osClock.State, profile)
 }
