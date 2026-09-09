@@ -981,7 +981,8 @@ func TestUpdateOSClockState(t *testing.T) {
 		bc.syncState.State = event.PTP_LOCKED
 		bc.overallSyncState = event.PTP_LOCKED
 
-		bc.SystemClockUpdate(event.PTP_FREERUN)
+		bc.osClock.State = event.PTP_FREERUN // Set on osClock on Clock Manager which this is a pointer to
+		bc.SystemClockUpdate()
 		assert.Equal(t, event.PTP_FREERUN, bc.overallSyncState)
 		assert.Equal(t, event.PTP_FREERUN, bc.osClock.State)
 		require.Len(t, rio.messages, 1)
@@ -996,7 +997,8 @@ func TestUpdateOSClockState(t *testing.T) {
 		bc.syncState.State = event.PTP_LOCKED
 		bc.overallSyncState = event.PTP_LOCKED
 
-		bc.SystemClockUpdate(event.PTP_LOCKED)
+		bc.osClock.State = event.PTP_LOCKED // Set on osClock on Clock Manager which this is a pointer to
+		bc.SystemClockUpdate()
 		assert.Equal(t, event.PTP_LOCKED, bc.overallSyncState)
 		assert.Empty(t, rio.messages)
 	})

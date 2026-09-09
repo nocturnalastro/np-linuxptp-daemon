@@ -13,7 +13,7 @@ import (
 // Clock represents a PTP clock instance tied to a specific config profile.
 type Clock interface {
 	AddEvent(ev event.Event) SyncState
-	SystemClockUpdate(state event.PTPState)
+	SystemClockUpdate()
 	Reset()
 	ConfigName() string
 	ClockType() event.ClockType

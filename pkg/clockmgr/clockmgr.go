@@ -184,17 +184,16 @@ func (m *ClockManager) GetUtcOffset() int {
 // handleOSClockEvent fans out a PHC2SYS/CHRONYD event to all clocks, emits os_clock_state message once, and emits
 // a sync_state message per-profile when the overall state changes.
 func (m *ClockManager) handleOSClockEvent(ev event.Event) {
-	prevClockState := m.osClock.State
 	ptp, ok := ev.Data.(*event.OffsetData)
 	if !ok {
 		glog.Warningf("handleOSClockEvent: received unexpected event")
 		return
 	}
 	m.osClock.AddEvent(ev)
-	m.osClock.State = ptp.State
-	if m.osClock.State == prevClockState {
+	if m.osClock.State == ptp.State {
 		return
 	}
+	m.osClock.State = ptp.State
 
 	// if the OS clock state changed, emit the event to CEP and also pass it along to each clock
 	osOffset := ptp.Offset
@@ -204,7 +203,7 @@ func (m *ClockManager) handleOSClockEvent(ev event.Event) {
 		Values: ipc.StateValue{State: event.PtpStateToIPCState(m.osClock.State), Offset: osOffset},
 	})
 	for _, clk := range m.clocks {
-		clk.SystemClockUpdate(m.osClock.State)
+		clk.SystemClockUpdate()
 	}
 }
 

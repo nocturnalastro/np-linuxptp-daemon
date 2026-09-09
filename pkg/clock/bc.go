@@ -71,7 +71,7 @@ func (c *BCClock) AddEvent(ev event.Event) SyncState {
 }
 
 // SystemClockUpdate updates the OS clock state.
-func (c *BCClock) SystemClockUpdate(osClockState event.PTPState) {
+func (c *BCClock) SystemClockUpdate() {
 	emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState, c.osClock.State, c.cfgName)
 }
 

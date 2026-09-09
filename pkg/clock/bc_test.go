@@ -76,7 +76,8 @@ func TestBCClock_UpdateOSClockState(t *testing.T) {
 		bc, rio := newTestBCClock()
 		bc.syncState = event.PTP_LOCKED
 		bc.overallSyncState = event.PTP_LOCKED
-		bc.SystemClockUpdate(event.PTP_FREERUN)
+		bc.osClock.State = event.PTP_FREERUN // Not this is set on the osClock on the ClockManager
+		bc.SystemClockUpdate()
 		assert.Equal(t, event.PTP_FREERUN, bc.overallSyncState)
 		assert.Equal(t, event.PTP_FREERUN, bc.osClock.State)
 		require.Len(t, rio.messages, 1)
@@ -88,7 +89,8 @@ func TestBCClock_UpdateOSClockState(t *testing.T) {
 		bc, rio := newTestBCClock()
 		bc.syncState = event.PTP_LOCKED
 		bc.overallSyncState = event.PTP_LOCKED
-		bc.SystemClockUpdate(event.PTP_LOCKED)
+		bc.osClock.State = event.PTP_LOCKED // Not this is set on the osClock on the ClockManager
+		bc.SystemClockUpdate()
 		assert.Equal(t, event.PTP_LOCKED, bc.overallSyncState)
 		assert.Empty(t, rio.messages)
 	})
@@ -97,7 +99,8 @@ func TestBCClock_UpdateOSClockState(t *testing.T) {
 		bc, rio := newTestBCClock()
 		bc.syncState = event.PTP_HOLDOVER
 		bc.overallSyncState = event.PTP_NOTSET
-		bc.SystemClockUpdate(event.PTP_LOCKED)
+		bc.osClock.State = event.PTP_LOCKED // Not this is set on the osClock on the ClockManager
+		bc.SystemClockUpdate()
 		assert.Equal(t, event.PTP_HOLDOVER, bc.overallSyncState)
 		require.Len(t, rio.messages, 1)
 		assert.Equal(t, ipc.TypeSyncState, rio.messages[0].Type)
@@ -107,7 +110,8 @@ func TestBCClock_UpdateOSClockState(t *testing.T) {
 		bc, rio := newTestBCClock()
 		bc.syncState = event.PTP_FREERUN
 		bc.overallSyncState = event.PTP_FREERUN
-		bc.SystemClockUpdate(event.PTP_LOCKED)
+		bc.osClock.State = event.PTP_LOCKED // Not this is set on the osClock on the ClockManager
+		bc.SystemClockUpdate()
 		assert.Equal(t, event.PTP_FREERUN, bc.overallSyncState)
 		assert.Empty(t, rio.messages)
 	})

@@ -179,7 +179,7 @@ func (c *GM) hasNonLeadingDPLLFault(leadingInterface string) bool {
 }
 
 // SystemClockUpdate updates the OS clock state.
-func (c *GM) SystemClockUpdate(osClockState event.PTPState) {
+func (c *GM) SystemClockUpdate() {
 	emitOverallSyncStateIfChanged(c.sendIPC, &c.overallSyncState, c.syncState.State, c.osClock.State, c.cfgName)
 }
 
