@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"os"
 	"os/exec"
 	"slices"
@@ -321,7 +320,7 @@ func (p *ptpProcess) processOutput(output string) string {
 			p.tBCTransitionCheck(output, p.pm)
 		}
 	} else if p.name == phc2sysProcessName && len(p.haProfile) > 0 {
-		p.announceHAFailOver(nil, output)
+		p.announceHAFailOver(output)
 	}
 	return output
 }
@@ -431,6 +430,8 @@ func (p *ptpProcess) run() {
 
 // for ts2phc along with processing metrics need to identify event
 func (p *ptpProcess) processPTPMetrics(output string) {
+	// TODO refactor into specific processes
+
 	state := event.PTP_FREERUN
 	if p.logParser != nil {
 		processWithParser(p, output)
@@ -507,7 +508,7 @@ func (p *ptpProcess) Stop() error {
 // }
 
 func (p *ptpProcess) processTs2PhcEvents(ptpOffset float64, source string, iface string, state event.PTPState, nmeaStatus *int64) {
-	// TODO should be process specific
+	// TODO should be ts2phc process specific
 	var ptpState event.PTPState
 	ptpState = state
 	ptpOffsetInt64 := int64(ptpOffset)
@@ -550,8 +551,9 @@ func (p *ptpProcess) processTs2PhcEvents(ptpOffset float64, source string, iface
 	}
 }
 
-func (p *ptpProcess) announceHAFailOver(c net.Conn, output string) {
-	// TODO
+func (p *ptpProcess) announceHAFailOver(output string) {
+	// TODO refactor into phc2sys specific process
+
 	defer func() {
 		if r := recover(); r != nil {
 			glog.Errorf("Recovered in f %#v", r)
@@ -597,19 +599,11 @@ func (p *ptpProcess) announceHAFailOver(c net.Conn, output string) {
 	for _, inActive := range inActiveProfiles {
 		logString = append(logString, fmt.Sprintf("%s[%d]:[%s] ptp_ha_profile %s state %d\n", p.name, time.Now().Unix(), p.configName, inActive, 0))
 	}
-	if c == nil {
-		for _, logProfile := range logString {
-			fmt.Printf("%s", logProfile)
-		}
-		UpdatePTPHAMetrics(currentProfile, inActiveProfiles, boolToInt(active))
-	} else {
-		for _, logProfile := range logString {
-			_, err := c.Write([]byte(logProfile))
-			if err != nil {
-				glog.Errorf("failed to write class change event %s", err.Error())
-			}
-		}
+
+	for _, logProfile := range logString {
+		fmt.Printf("%s", logProfile)
 	}
+	UpdatePTPHAMetrics(currentProfile, inActiveProfiles, boolToInt(active))
 }
 
 // boolToInt converts a boolean to int64 (true=1, false=0).
@@ -632,6 +626,8 @@ func boolToInt(b bool) int64 {
 // - Out-of-domain active returns (false, true)
 // - Default returns (false, false)
 func failOverIndicator(output string, count int) (inDomain bool, active bool) {
+	// TODO refactor into phc2sys specific process
+
 	if strings.Contains(output, HAInDomainIndicator) { // in-domain indicator found
 		if count == 1 {
 			return true, true // single profile is always active
@@ -701,6 +697,8 @@ func (p *ptpProcess) replaceClockID(input string) (output string) {
 // updateGMStatusOnProcessDown send events when  ts2phc process is down by
 // send event to EventHandler
 func (p *ptpProcess) updateGMStatusOnProcessDown(process string) {
+	// TODO refactor into tsphc specific process
+
 	// need to update GM status for  following process kill for  ts2phc
 	if process == ts2phcProcessName {
 		// ts2phc process dead should update GM-STATUS
@@ -718,7 +716,7 @@ func (p *ptpProcess) updateGMStatusOnProcessDown(process string) {
 }
 
 func (p *ptpProcess) processSynceEvents(logEntry synce.LogEntry) {
-	// TODO refactor into process
+	// TODO refactor into SyncE process
 
 	//                                          STATE  VALUE  DEVICE   SOURCE EXTSOURCE
 	//------------------------------------------------------------------------------------
@@ -827,7 +825,7 @@ func (p *ptpProcess) processSynceEvents(logEntry synce.LogEntry) {
 }
 
 func (p *ptpProcess) SyncEDeviceByInterface(iface string) *synce.Config {
-	// TODO refactor into process
+	// TODO refactor into SyncE process
 
 	if p.syncERelations != nil {
 		for _, sConfig := range p.syncERelations.Devices {
@@ -843,7 +841,7 @@ func (p *ptpProcess) SyncEDeviceByInterface(iface string) *synce.Config {
 
 // SyncEDeviceByName ....
 func (p *ptpProcess) SyncEDeviceByName(name string) *synce.Config {
-	// TODO refactor into process
+	// TODO refactor into SyncE process
 
 	if p.syncERelations != nil {
 		for _, sConfig := range p.syncERelations.Devices {
@@ -883,7 +881,7 @@ func (p *ptpProcess) getPTPClockID() (string, error) {
 }
 
 func (p *ptpProcess) sendPtp4lStateEvent() {
-	// TODO refactor into process
+	// TODO refactor into Ptp4l process
 
 	clockID, err := p.getPTPClockID()
 	if err != nil {
@@ -1215,6 +1213,7 @@ func NewPhc2sysProcess(env ptpProcessEnv) (*ptpProcess, error) {
 	return p, nil
 }
 
+// TODO: Add comment explaining the conditions and why we have them
 func phc2sysOffsetStartCondition(env ptpProcessEnv) process.Condition {
 	base := process.OnStateAndOffsetForCount{
 		State:     event.PTP_LOCKED,
@@ -1322,6 +1321,7 @@ func NewTs2phcProcess(env ptpProcessEnv) (*ptpProcess, error) {
 	return p, nil
 }
 
+// TODO: Add comment explaining the conditions and why we have them
 func ts2phcConditionsForTBC(p *ptpProcess, env ptpProcessEnv) map[process.Action]process.Condition {
 	conditions := map[process.Action]process.Condition{}
 
