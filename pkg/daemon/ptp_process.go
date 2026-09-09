@@ -1316,15 +1316,13 @@ func NewTs2phcProcess(env ptpProcessEnv) (*ptpProcess, error) {
 		return nil, err
 	}
 	p.cmd = buildCmd(buildPtpCmdLine(ts2phcProcessName, configPath, opts, env.nodeProfile))
-	if profileClockType(env.nodeProfile) == TBC && env.dn != nil {
-		if p.conditions == nil {
-			p.conditions = ts2phcConditions(p, env)
-		}
+	if profileClockType(env.nodeProfile) == TBC && env.dn != nil && p.conditions == nil {
+		p.conditions = ts2phcConditionsForTBC(p, env)
 	}
 	return p, nil
 }
 
-func ts2phcConditions(p *ptpProcess, env ptpProcessEnv) map[process.Action]process.Condition {
+func ts2phcConditionsForTBC(p *ptpProcess, env ptpProcessEnv) map[process.Action]process.Condition {
 	conditions := map[process.Action]process.Condition{}
 
 	// Build ts2phc start condition: ptp4l locked with stable offset, and (if configured) phc2sys locked with stable offset
@@ -1343,7 +1341,7 @@ func ts2phcConditions(p *ptpProcess, env ptpProcessEnv) map[process.Action]proce
 		},
 	}
 
-	// Add phc2sys dependency only if configured (single phc2sys per node, including HA)
+	// Add phc2sys dependency only if phc2sys is configured
 	// p.haProfile is already set at this point from ApplyHaProfiles
 	if shouldWaitForPhc2sys(env.nodeProfile, p.haProfile) {
 		cfgName := fmt.Sprintf("ptp4l.%d.config", env.runID)
