@@ -8,16 +8,6 @@ import (
 	ptpv1 "github.com/k8snetworkplumbingwg/ptp-operator/api/v1"
 )
 
-// type process interface {
-// 	Name() string
-// 	Stopped() bool
-// 	CmdStop()
-// 	CmdInit()
-// 	ProcessStatus(c net.Conn, status int64)
-// 	CmdRun(stdToSocket bool)
-// 	ExitCh() chan struct{}
-// }
-
 // Action is an enumeration for process control operations.
 type Action int
 
