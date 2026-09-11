@@ -1169,28 +1169,3 @@ func (dn *Daemon) populateHAInterfaces(osClockConfigs *OSClockConfigs) {
 		}
 	}
 }
-
-// haLinkedPtp4lConfigNames returns ptp4l config names for profiles listed in
-// this profile's haProfiles setting. The HA ptp4l processes must already exist.
-func (dn *Daemon) haLinkedPtp4lConfigNames(nodeProfile *ptpv1.PtpProfile) []string {
-	if dn == nil || dn.processManager == nil {
-		return nil
-	}
-	var cfgs []string
-	for _, profileName := range listHaProfiles(nodeProfile) {
-		for _, proc := range dn.processManager.process {
-			if proc.Name() != ptp4lProcessName {
-				continue
-			}
-			profile := proc.Profile()
-			if profile == nil || profile.Name == nil || *profile.Name != profileName {
-				continue
-			}
-			if cfg := proc.ConfigName(); cfg != "" {
-				cfgs = append(cfgs, cfg)
-			}
-			break
-		}
-	}
-	return cfgs
-}
