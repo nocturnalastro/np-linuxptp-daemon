@@ -16,8 +16,6 @@ const (
 	ActionStart   Action = iota // launch the process
 	ActionStop                  // gracefully stop the process
 	ActionRestart               // stop then start
-	ActionEnable                // logical enable (process stays running)
-	ActionDisable               // logical disable (process stays running)
 )
 
 // State is an enumeration for lifecycle stages of a process.
@@ -51,14 +49,6 @@ func (s State) String() string {
 	default:
 		return fmt.Sprintf("ProcessState(%d)", int(s))
 	}
-}
-
-// Enabler is an optional interface for processes that support logical
-// enable/disable without stopping. Only chronydProcess implements this.
-type Enabler interface {
-	Enable() error
-	Disable() error
-	IsEnabled() bool
 }
 
 // Process represents a manageable PTP process with lifecycle control and event-driven conditions.

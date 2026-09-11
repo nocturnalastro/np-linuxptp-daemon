@@ -87,7 +87,7 @@ func condLog(p Process, c Condition, met bool, detail string) {
 	if p != nil {
 		name = p.Name()
 	}
-	glog.Infof("condition %s process=%s met=%v %s", c, name, met, detail)
+	glog.Infof("condition %s process=%q met=%v %s", c, name, met, detail)
 }
 
 // Immediate is a condition that is always met immediately.
