@@ -35,13 +35,17 @@ type stubProcess struct {
 	iface     string
 	state     process.State
 	starts    int
+	stops     int
 	deps      []process.Process
 	conds     map[process.Action]process.Condition
 	profile   *ptpv1.PtpProfile
 	mu        sync.RWMutex
 }
 
-func (s *stubProcess) Name() string       { return s.name }
+func (s *stubProcess) Name() string {
+	return s.name
+}
+
 func (s *stubProcess) ConfigName() string { return s.cfgName }
 func (s *stubProcess) Start(context.Context) error {
 	s.mu.Lock()
@@ -53,12 +57,19 @@ func (s *stubProcess) Start(context.Context) error {
 func (s *stubProcess) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.stops++
+	s.state = process.Stopped
 	return nil
 }
 func (s *stubProcess) Starts() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.starts
+}
+func (s *stubProcess) Stops() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.stops
 }
 func (s *stubProcess) Conditions() map[process.Action]process.Condition {
 	return s.conds
@@ -159,13 +170,15 @@ func (c *ConditionsTester) Daemon() *Daemon {
 	return c.dn
 }
 
-func (c *ConditionsTester) Env(runID int, profile *ptpv1.PtpProfile, clockType event.ClockType) ptpProcessEnv {
+func (c *ConditionsTester) Env(runID int, profile *ptpv1.PtpProfile, clockType event.ClockType, extraProfiles ...ptpv1.PtpProfile) ptpProcessEnv {
+	osClockConfigs := NewOSClockConfigs(append([]ptpv1.PtpProfile{*profile}, extraProfiles...))
 	return ptpProcessEnv{
-		runID:       runID,
-		nodeProfile: profile,
-		clockType:   clockType,
-		dn:          c.dn,
-		hasFailover: profile != nil && profile.Plugins != nil && profile.Plugins[ntpfailover] != nil,
+		runID:          runID,
+		nodeProfile:    profile,
+		clockType:      clockType,
+		dn:             c.dn,
+		hasFailover:    profile.Plugins != nil && profile.Plugins[ntpfailover] != nil,
+		osClockConfigs: &osClockConfigs,
 	}
 }
 
@@ -176,19 +189,6 @@ func (c *ConditionsTester) AddProcess(p process.Process) *stubProcess {
 	}
 	c.pm.process = append(c.pm.process, s)
 	return s
-}
-
-func (c *ConditionsTester) AddEnabler(p process.Process) *stubEnabler {
-	s, ok := p.(*stubProcess)
-	if !ok {
-		s = newStubProcess(p)
-	}
-	e := &stubEnabler{
-		stubProcess: s,
-		enabled:     false,
-	}
-	c.pm.process = append(c.pm.process, e)
-	return e
 }
 
 func (c *ConditionsTester) StartPM() {
@@ -439,7 +439,8 @@ func TestEvalActions_StopRunningProcess(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("event was not forwarded")
 	}
-	assert.Equal(t, process.Running, phc2sys.state)
+	assert.Equal(t, 1, phc2sys.stops)
+	assert.Equal(t, process.Stopped, phc2sys.state)
 }
 
 func TestEvalActions_StartStoppedProcess(t *testing.T) {
@@ -458,36 +459,14 @@ func TestEvalActions_StartStoppedProcess(t *testing.T) {
 	assert.Eventually(t, func() bool { return phc2sys.Starts() == 1 }, 2*time.Second, 10*time.Millisecond)
 }
 
-// stubEnabler is a process that also satisfies process.Enabler.
-type stubEnabler struct {
-	*stubProcess
-	enabled  bool
-	enables  int
-	disables int
-}
-
-func (s *stubEnabler) Enable() error {
-	s.enables++
-	s.enabled = true
-	return nil
-}
-
-func (s *stubEnabler) Disable() error {
-	s.disables++
-	s.enabled = false
-	return nil
-}
-
-func (s *stubEnabler) IsEnabled() bool { return s.enabled }
-
-func TestEvalActions_EnableDisableOnEnabler(t *testing.T) {
+func TestEvalActions_StartStopChronyD(t *testing.T) {
 	ct := NewCondiitonsTester(t, event.OC)
-	chronyd := ct.AddEnabler(&stubProcess{
+	chronyd := ct.AddProcess(&stubProcess{
 		name:  "chronyd",
-		state: process.Running,
+		state: process.Created,
 		conds: map[process.Action]process.Condition{
-			process.ActionEnable:  process.OnPluginEvent{EventName: testGNSSFailover},
-			process.ActionDisable: process.OnPluginEvent{EventName: testGNSSRecovered},
+			process.ActionStart: process.OnPluginEvent{EventName: testGNSSFailover},
+			process.ActionStop:  process.OnPluginEvent{EventName: testGNSSRecovered},
 		},
 	})
 
@@ -499,9 +478,9 @@ func TestEvalActions_EnableDisableOnEnabler(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("event was not forwarded")
 	}
-	assert.Equal(t, 1, chronyd.enables)
-	assert.Equal(t, 0, chronyd.disables)
-	assert.True(t, chronyd.IsEnabled())
+	assert.Equal(t, 1, chronyd.starts)
+	assert.Equal(t, 0, chronyd.stops)
+	assert.Equal(t, process.Running, chronyd.state)
 
 	ct.SendPluginEvent(ntpfailover, testGNSSRecovered)
 	select {
@@ -509,9 +488,9 @@ func TestEvalActions_EnableDisableOnEnabler(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("event was not forwarded")
 	}
-	assert.Equal(t, 1, chronyd.enables)
-	assert.Equal(t, 1, chronyd.disables)
-	assert.False(t, chronyd.IsEnabled())
+	assert.Equal(t, 1, chronyd.starts)
+	assert.Equal(t, 1, chronyd.stops)
+	assert.Equal(t, process.Stopped, chronyd.state)
 
 	// Do it a second time to make sure it can handle a cycles
 	ct.SendPluginEvent(ntpfailover, testGNSSFailover)
@@ -520,9 +499,9 @@ func TestEvalActions_EnableDisableOnEnabler(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("event was not forwarded")
 	}
-	assert.Equal(t, 2, chronyd.enables)
-	assert.Equal(t, 1, chronyd.disables)
-	assert.True(t, chronyd.IsEnabled())
+	assert.Equal(t, 2, chronyd.starts)
+	assert.Equal(t, 1, chronyd.stops)
+	assert.Equal(t, process.Running, chronyd.state)
 
 	ct.SendPluginEvent(ntpfailover, testGNSSRecovered)
 	select {
@@ -530,9 +509,9 @@ func TestEvalActions_EnableDisableOnEnabler(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("event was not forwarded")
 	}
-	assert.Equal(t, 2, chronyd.enables)
-	assert.Equal(t, 2, chronyd.disables)
-	assert.False(t, chronyd.IsEnabled())
+	assert.Equal(t, 2, chronyd.starts)
+	assert.Equal(t, 2, chronyd.stops)
+	assert.Equal(t, process.Stopped, chronyd.state)
 }
 
 func TestEvalActions_StartNotCheckedWhenRunning(t *testing.T) {
@@ -555,17 +534,17 @@ func TestEvalActions_StartNotCheckedWhenRunning(t *testing.T) {
 	assert.Equal(t, 0, phc2sys.starts)
 }
 
-func TestEvalActions_EnableOnlyWhenDisabled(t *testing.T) {
+func TestEvalActions_StartOnlyWhenStopped(t *testing.T) {
 	ct := NewCondiitonsTester(t, event.OC)
-	chronyd := ct.AddEnabler(&stubProcess{
+	chronyd := ct.AddProcess(&stubProcess{
 		name:  "chronyd",
 		state: process.Running,
 		conds: map[process.Action]process.Condition{
-			process.ActionEnable:  process.OnPluginEvent{EventName: testGNSSFailover},
-			process.ActionDisable: process.OnPluginEvent{EventName: testGNSSRecovered},
+			process.ActionStart: process.OnPluginEvent{EventName: testGNSSFailover},
+			process.ActionStop:  process.OnPluginEvent{EventName: testGNSSRecovered},
 		},
 	})
-	chronyd.enabled = true
+	chronyd.state = process.Running
 	ct.pm.process = append(ct.pm.process, chronyd)
 	ct.StartPM()
 
@@ -575,8 +554,8 @@ func TestEvalActions_EnableOnlyWhenDisabled(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("event was not forwarded")
 	}
-	assert.Equal(t, 0, chronyd.enables)
-	assert.Equal(t, 0, chronyd.disables)
+	assert.Equal(t, 0, chronyd.starts)
+	assert.Equal(t, 0, chronyd.stops)
 }
 
 func TestEvalActions_NoActionWithoutCondition(t *testing.T) {
@@ -603,30 +582,30 @@ func TestEvalActions_FullFailoverFlow(t *testing.T) {
 			process.ActionStart: process.OnPluginEvent{EventName: testGNSSRecovered},
 		},
 	})
-	chronyd := ct.AddEnabler(&stubProcess{
+	chronyd := ct.AddProcess(&stubProcess{
 		name:  "chronyd",
-		state: process.Running,
+		state: process.Created,
 		conds: map[process.Action]process.Condition{
-			process.ActionEnable:  process.OnPluginEvent{EventName: testGNSSFailover},
-			process.ActionDisable: process.OnPluginEvent{EventName: testGNSSRecovered},
+			process.ActionStart: process.OnPluginEvent{EventName: testGNSSFailover},
+			process.ActionStop:  process.OnPluginEvent{EventName: testGNSSRecovered},
 		},
 	})
 	ct.pm.process = append(ct.pm.process, chronyd)
 	ct.StartPM()
 
-	// Failover: stop phc2sys + enable chronyd
+	// Failover: stop phc2sys + Start chronyd
 	ct.SendPluginEvent(ntpfailover, testGNSSFailover)
 	select {
 	case <-ct.pm.eventsOut:
 	case <-time.After(2 * time.Second):
 		t.Fatal("failover event was not forwarded")
 	}
-	assert.Equal(t, 1, chronyd.enables, "chronyd should be enabled on failover")
+	assert.Equal(t, 1, chronyd.starts, "chronyd should be Startd on failover")
 
 	// Simulate phc2sys being stopped
 	phc2sys.state = process.Stopped
 
-	// Recovery: start phc2sys + disable chronyd
+	// Recovery: start phc2sys + Stop chronyd
 	ct.SendPluginEvent(ntpfailover, testGNSSRecovered)
 	assert.Eventually(t, func() bool { return phc2sys.Starts() == 1 }, 2*time.Second, 10*time.Millisecond)
 	select {
@@ -634,7 +613,7 @@ func TestEvalActions_FullFailoverFlow(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("recovery event was not forwarded")
 	}
-	assert.Equal(t, 1, chronyd.disables, "chronyd should be disabled on recovery")
+	assert.Equal(t, 1, chronyd.stops, "chronyd should be Stopped on recovery")
 }
 
 func TestForwardEvents_AllStatefulStartsWhenAllConditionsMet(t *testing.T) {
@@ -778,7 +757,9 @@ func TestEvalActions_DelayedPhc2sysHAProfile(t *testing.T) {
 }
 
 func TestPhc2sysOffsetStartCondition_TGM(t *testing.T) {
-	c := phc2sysOffsetStartCondition(ptpProcessEnv{runID: 2, clockType: event.GM, nodeProfile: &ptpv1.PtpProfile{PtpSettings: map[string]string{clockTypeSetting: TGM}}})
+	profile := ptpv1.PtpProfile{PtpSettings: map[string]string{clockTypeSetting: TGM}}
+	osClockConfigs := NewOSClockConfigs([]ptpv1.PtpProfile{profile})
+	c := phc2sysOffsetStartCondition(ptpProcessEnv{runID: 2, clockType: event.GM, nodeProfile: &profile, osClockConfigs: &osClockConfigs})
 	assert.Equal(t, process.OnStateAndOffsetForCount{
 		ClockID:    "ts2phc.2.config",
 		ConfigName: "ts2phc.2.config",
@@ -802,7 +783,9 @@ func TestPhc2sysOffsetStartCondition_InferredGM(t *testing.T) {
 }
 
 func TestPhc2sysOffsetStartCondition_TBC(t *testing.T) {
-	c := phc2sysOffsetStartCondition(ptpProcessEnv{runID: 0, clockType: event.TBC, nodeProfile: &ptpv1.PtpProfile{PtpSettings: map[string]string{clockTypeSetting: TBC}}})
+	profile := ptpv1.PtpProfile{PtpSettings: map[string]string{clockTypeSetting: TBC}}
+	osClockConfigs := NewOSClockConfigs([]ptpv1.PtpProfile{profile})
+	c := phc2sysOffsetStartCondition(ptpProcessEnv{runID: 0, clockType: event.TBC, nodeProfile: &profile, osClockConfigs: &osClockConfigs})
 	assert.Equal(t, process.OnStateAndOffsetForCount{
 		ClockID:    ptp4lConfig,
 		ConfigName: ptp4lConfig,
@@ -820,15 +803,29 @@ func TestPhc2sysOffsetStartCondition_HA(t *testing.T) {
 	ct.AddProcess(&ptpProcess{ExecProcess: ExecProcess{name: ptp4lProcessName, configName: "ptp4l.0.config"}, nodeProfile: &ptpv1.PtpProfile{Name: &master1}})
 	ct.AddProcess(&ptpProcess{ExecProcess: ExecProcess{name: ptp4lProcessName, configName: testPtp4l1Config}, nodeProfile: &ptpv1.PtpProfile{Name: &master2}})
 
-	profile := &ptpv1.PtpProfile{PtpSettings: map[string]string{PTP_HA_IDENTIFIER: master1 + "," + master2, clockTypeSetting: TBC}}
-	c := phc2sysOffsetStartCondition(ct.Env(5, profile, event.TBC))
+	phc2sysConf := " "
+	phc2sysOpts := " "
+
+	profile := &ptpv1.PtpProfile{
+		Phc2sysConf: &phc2sysConf,
+		Phc2sysOpts: &phc2sysOpts,
+		PtpSettings: map[string]string{PTP_HA_IDENTIFIER: master1 + "," + master2,
+			clockTypeSetting: TBC,
+		}}
+
+	extraProfles := []ptpv1.PtpProfile{
+		{Name: &master1},
+		{Name: &master2},
+	}
+
+	c := phc2sysOffsetStartCondition(ct.Env(5, profile, event.TBC, extraProfles...))
 	anyCond, ok := c.(process.Any)
 	if !assert.True(t, ok, "HA should wrap per-config conditions in Any") {
 		return
 	}
 	assert.Len(t, anyCond.Conditions, 2)
-	assert.Equal(t, ptp4lConfig, anyCond.Conditions[0].(process.OnStateAndOffsetForCount).ConfigName)
-	assert.Equal(t, testPtp4l1Config, anyCond.Conditions[1].(process.OnStateAndOffsetForCount).ConfigName)
+	assert.Equal(t, testPtp4l1Config, anyCond.Conditions[0].(process.OnStateAndOffsetForCount).ConfigName)
+	assert.Equal(t, "ptp4l.2.config", anyCond.Conditions[1].(process.OnStateAndOffsetForCount).ConfigName)
 	assert.Equal(t, event.PTP4l, anyCond.Conditions[0].(process.OnStateAndOffsetForCount).Source)
 }
 
@@ -1099,6 +1096,6 @@ func TestUnlock_Failover_Phc2sysAndChronyd(t *testing.T) {
 	assert.Eventually(t, func() bool { return phc2sysStub.Starts() == 1 }, 2*time.Second, 10*time.Millisecond,
 		"phc2sys must start when gnss_recovered event arrives")
 
-	assert.NotNil(t, chronydStub.Conditions()[process.ActionEnable])
-	assert.NotNil(t, chronydStub.Conditions()[process.ActionDisable])
+	assert.NotNil(t, chronydStub.Conditions()[process.ActionStart])
+	assert.NotNil(t, chronydStub.Conditions()[process.ActionStop])
 }
