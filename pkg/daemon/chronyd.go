@@ -1,10 +1,8 @@
 package daemon
 
 import (
-	"os/exec"
+	"fmt"
 
-	"github.com/golang/glog"
-	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/event"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/process"
 )
 
@@ -12,35 +10,35 @@ import (
 // via chronyc online/offline. Only this type satisfies process.Enabler.
 type chronydProcess struct {
 	*ptpProcess
-	enabled bool
 }
 
-func (c *chronydProcess) Enable() error {
-	out, err := exec.Command("chronyc", "-h", ChronydSocketPath, "online").Output()
-	if err != nil {
-		glog.Errorf("chronyc online failed: %v, output: %s", err, string(out))
-		return err
+// NewChronydProcess creates a new chronyd process instance.
+func NewChronydProcess(env ptpProcessEnv) (*chronydProcess, error) {
+	if !env.hasFailover {
+		return nil, fmt.Errorf("chronyd process only needed when we have ntpFailover")
 	}
-	c.enabled = true
-	processStatus(c.name, c.messageTag, PtpProcessUp)
-	sendProcessStatusEvent(c.eventCh, event.EventSource(c.name), c.configName, c.clockType, "", PtpProcessUp)
-	return nil
-}
 
-func (c *chronydProcess) Disable() error {
-	out, err := exec.Command("chronyc", "-h", ChronydSocketPath, "offline").Output()
+	configFile := fmt.Sprintf("chronyd.%d.config", env.runID)
+	configPath := fmt.Sprintf("%s/%s", configPrefix, configFile)
+	messageTag := fmt.Sprintf("[chronyd.%d.config]", env.runID)
+	p := newPtpProcess(chronydProcessName, configFile, configPath, "", messageTag, env.nodeProfile, env.clockType, env.dn)
+	output, opts, err := p.loadProcessConf(env)
 	if err != nil {
-		glog.Errorf("chronyc offline failed: %v, output: %s", err, string(out))
-		return err
+		return nil, err
 	}
-	c.enabled = false
-	processStatus(c.name, c.messageTag, PtpProcessDown)
-	sendProcessStatusEvent(c.eventCh, event.EventSource(c.name), c.configName, c.clockType, "", PtpProcessDown)
-	return nil
-}
-
-func (c *chronydProcess) IsEnabled() bool { return c.enabled }
-
-func (c *chronydProcess) Conditions() map[process.Action]process.Condition {
-	return c.conditions
+	output.setPtp4lConfOption("", "bindcmdaddress", ChronydSocketPath, true)
+	output.profile_name = *env.nodeProfile.Name
+	p.addMonitorFlags(output, opts)
+	var configOutput string
+	configOutput, p.ifaces = output.RenderPtp4lConf()
+	if err = p.writeProcessConf(output, configOutput); err != nil {
+		return nil, err
+	}
+	p.cmd = buildCmd(buildPtpCmdLine(chronydProcessName, configPath, opts, env.nodeProfile))
+	cp := &chronydProcess{ptpProcess: p}
+	cp.conditions = map[process.Action]process.Condition{
+		process.ActionStart: process.OnPluginEvent{EventName: process.GnssFailoverEventName},
+		process.ActionStop:  process.OnPluginEvent{EventName: process.GnssRecoveredEventName},
+	}
+	return cp, nil
 }
