@@ -46,7 +46,7 @@ func startProcessWithRetry(ctx context.Context, p process.Process, timeout time.
 	for retryCount := 0; ; retryCount++ {
 		select {
 		case <-ctx.Done():
-			glog.Infof("exiting start for %s in profile %s, context cancelled", p.Name(), profileName(p))
+			glog.Infof("exiting start for %s in profile %s, context cancelled", p.Name(), getProfileName(p.Profile()))
 			return nil
 		case <-timeoutCh:
 			return fmt.Errorf("failed to start %s after %d attempts: %s", p.Name(), retryCount, lastErr)
@@ -55,22 +55,12 @@ func startProcessWithRetry(ctx context.Context, p process.Process, timeout time.
 			if err != nil {
 				lastErr = err
 				glog.Errorf("failed to start process %s: %s, retrying...", p.Name(), err)
+				time.Sleep(500 * time.Millisecond)
 				continue
 			}
 			return nil
 		}
 	}
-}
-
-func profileName(p process.Process) string {
-	if p == nil {
-		return ""
-	}
-	prof := p.Profile()
-	if prof == nil || prof.Name == nil {
-		return ""
-	}
-	return *prof.Name
 }
 
 func (pm *ProcessManager) forEachProcess(fn func(process.Process)) {
@@ -82,7 +72,7 @@ func (pm *ProcessManager) forEachProcess(fn func(process.Process)) {
 	}
 }
 
-func (pm *ProcessManager) startOne(ctx context.Context, p process.Process) {
+func (pm *ProcessManager) startProcess(ctx context.Context, p process.Process) {
 	if err := startProcessWithRetry(ctx, p, processStartTimeout); err != nil {
 		glog.Errorf("Failed to start process: %s", err)
 		return
@@ -107,7 +97,7 @@ func (pm *ProcessManager) StartProcesses(ctx context.Context) {
 		}
 		cond := process.GetCondition(p, process.ActionStart, immediate)
 		if _, imm := cond.(process.Immediate); imm {
-			pm.startOne(ctx, p)
+			pm.startProcess(ctx, p)
 			return
 		}
 		glog.Infof("ProcessManager: waiting to start %s until %s", p.Name(), cond)
@@ -212,21 +202,21 @@ func (pm *ProcessManager) evalActions(ctx context.Context, ev event.Event) {
 		switch p.State() {
 		case process.Created:
 			if cond := process.GetCondition(p, process.ActionStart, process.Immediate{}); cond.Met(p, ev, stats) {
-				pm.startOne(ctx, p)
+				pm.startProcess(ctx, p)
 				hasChanged = true
 			} else {
 				glog.Infof("ProcessManager: waiting to start %s until %s", p.Name(), cond)
 			}
 		case process.Dead:
 			if cond := process.GetCondition(p, process.ActionRestart, process.Immediate{}); cond.Met(p, ev, stats) {
-				pm.startOne(ctx, p)
+				pm.startProcess(ctx, p)
 				hasChanged = true
 			} else {
 				glog.Infof("ProcessManager: waiting to restart from dead %s until %s", p.Name(), cond)
 			}
 		case process.Stopped:
 			if cond := process.GetCondition(p, process.ActionRestart, process.Never{}); cond.Met(p, ev, stats) {
-				pm.startOne(ctx, p)
+				pm.startProcess(ctx, p)
 				hasChanged = true
 			} else {
 				glog.Infof("ProcessManager: waiting to restart %s until %s", p.Name(), cond)
