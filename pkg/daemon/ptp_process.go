@@ -450,12 +450,12 @@ func (p *ptpProcess) processPTPMetrics(output string) {
 		p.hasCollectedMetrics = true
 		p.offset = ptpOffset
 		if iface != "" { // for ptp4l/phc2sys this function only update metrics
-			var nmeaStatus *int64
+			var nmeaLocked *bool
 			ifaceName := masterOffsetIface.getByAlias(configName, iface).name
 			if iface != clockRealTime && p.name == ts2phcProcessName {
 				eventSource := p.ifaces.GetEventSource(ifaceName)
 				if eventSource == event.GNSS {
-					nmeaStatus = event.Int64Ptr(1)
+					nmeaLocked = event.Ptr(true)
 				}
 			}
 			// ts2phc has to be handled differently since it announce holdover state when gnss is lost
@@ -468,7 +468,7 @@ func (p *ptpProcess) processPTPMetrics(output string) {
 			case HOLDOVER:
 				state = event.PTP_HOLDOVER // consider s1 state as holdover,this passed to event to create metrics and events
 			}
-			p.processTs2PhcEvents(ptpOffset, source, ifaceName, state, nmeaStatus)
+			p.processTs2PhcEvents(ptpOffset, source, ifaceName, state, nmeaLocked)
 		}
 	}
 }
@@ -509,7 +509,7 @@ func (p *ptpProcess) Stop() error {
 // 	// not implemented
 // }
 
-func (p *ptpProcess) processTs2PhcEvents(ptpOffset float64, source string, iface string, state event.PTPState, nmeaStatus *int64) {
+func (p *ptpProcess) processTs2PhcEvents(ptpOffset float64, source string, iface string, state event.PTPState, nmeaLocked *bool) {
 	// TODO should be ts2phc process specific
 	var ptpState event.PTPState
 	ptpState = state
@@ -528,12 +528,12 @@ func (p *ptpProcess) processTs2PhcEvents(ptpOffset float64, source string, iface
 			IFace:      iface,
 			ClockType:  p.clockType,
 			Time:       time.Now().UnixMilli(),
-			WriteToLog: nmeaStatus != nil,
+			WriteToLog: nmeaLocked != nil,
 			Reset:      false,
 			Data: &event.OffsetData{
 				State:      ptpState,
 				Offset:     ptpOffsetInt64,
-				NMEAStatus: nmeaStatus,
+				NMEALocked: nmeaLocked,
 			},
 		}:
 		default:

@@ -166,7 +166,7 @@ func processParsedMetrics(process *ptpProcess, ptpMetrics *parser.Metrics) {
 			Offset: int64(ptpMetrics.Offset),
 		}
 		if eventSource == event.GNSS {
-			od.NMEAStatus = event.Int64Ptr(1)
+			od.NMEALocked = event.Ptr(true)
 		}
 		select {
 		case process.eventCh <- event.Event{

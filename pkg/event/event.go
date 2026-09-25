@@ -148,15 +148,15 @@ type OffsetData struct {
 	State      PTPState
 	Offset     int64
 	SourceLost bool
-	NMEAStatus *int64 // ts2phc GNSS only
+	NMEALocked *bool // ts2phc GNSS only
 }
 
 func (*OffsetData) eventData() {}
 
 func (d *OffsetData) String() string {
 	parts := make([]string, 0, 3)
-	if d.NMEAStatus != nil {
-		parts = append(parts, fmt.Sprintf("%s %d", NMEA_STATUS, *d.NMEAStatus))
+	if d.NMEALocked != nil {
+		parts = append(parts, fmt.Sprintf("%s %t", NMEA_STATUS, *d.NMEALocked))
 	}
 	parts = append(parts, fmt.Sprintf("%s %d", OFFSET, d.Offset), string(d.State))
 	return strings.Join(parts, " ")
@@ -330,6 +330,7 @@ func (d *PluginData) String() string { return d.EventName }
 
 // Int64Ptr returns a pointer to v. Used by DPLL/offset senders for optional fields.
 func Int64Ptr(v int64) *int64 { return &v }
+func Ptr[T any](v T) *T       { return &v }
 
 // BytePtr returns a pointer to v. Used by SyncE senders for optional QL fields.
 func BytePtr(v byte) *byte { return &v }

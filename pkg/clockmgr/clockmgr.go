@@ -361,8 +361,8 @@ func (m *ClockManager) updateMetrics(ev event.Event) {
 		processData = map[event.ValueType]interface{}{
 			event.OFFSET: data.Offset,
 		}
-		if data.NMEAStatus != nil {
-			processData[event.NMEA_STATUS] = *data.NMEAStatus
+		if data.NMEALocked != nil {
+			processData[event.NMEA_STATUS] = *data.NMEALocked
 		}
 	case *event.DPLLData:
 		processData = map[event.ValueType]interface{}{}
