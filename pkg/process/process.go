@@ -64,4 +64,5 @@ type Process interface {
 	Profile() *ptpv1.PtpProfile    // Should go away
 	ClockType() event.ClockType    // Should go away
 	DependentProcesses() []Process // Should go away
+	SyncInitialState()
 }

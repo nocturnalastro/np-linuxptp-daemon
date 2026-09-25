@@ -47,6 +47,7 @@ func (s *stubProcess) Name() string {
 }
 
 func (s *stubProcess) ConfigName() string { return s.cfgName }
+func (s *stubProcess) SyncInitialState()  {}
 func (s *stubProcess) Start(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

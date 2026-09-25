@@ -80,6 +80,9 @@ func (gp *GpsPipe) Conditions() map[process.Action]process.Condition {
 	return gp.conditions
 }
 
+// SyncInitialState ...
+func (gp *GpsPipe) SyncInitialState() {}
+
 // State returns the current process state of GpsPipe.
 func (gp *GpsPipe) State() process.State {
 	gp.execMutex.RLock()

@@ -28,6 +28,7 @@ func (s *stubProc) State() State                     { return Created }
 func (s *stubProc) Profile() *ptpv1.PtpProfile       { return &ptpv1.PtpProfile{} }
 func (s *stubProc) ClockType() event.ClockType       { return event.OC }
 func (s *stubProc) DependentProcesses() []Process    { return nil }
+func (s *stubProc) SyncInitialState()                {}
 
 func TestGetCondition_MissingStartIsImmediate(t *testing.T) {
 	p := &stubProc{}

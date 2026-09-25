@@ -127,6 +127,9 @@ func (g *GPSD) ConfigName() string {
 	return g.processConfig.ConfigName
 }
 
+// SyncInitialState ...
+func (g *GPSD) SyncInitialState() {}
+
 func (g *GPSD) gnssClockType() event.ClockType {
 	if g.processConfig.ClockType != "" {
 		return g.processConfig.ClockType

@@ -75,6 +75,9 @@ func (p *ExecProcess) Conditions() map[process.Action]process.Condition {
 	return p.conditions
 }
 
+// SyncInitialState ...
+func (p *ExecProcess) SyncInitialState() {}
+
 type ptpProcess struct {
 	ExecProcess // TODO Make these the same
 

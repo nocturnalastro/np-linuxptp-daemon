@@ -82,6 +82,9 @@ func (pmc *PMCProcess) ConfigName() string {
 	return pmc.configFileName
 }
 
+// SyncInitialState ...
+func (pmc *PMCProcess) SyncInitialState() {}
+
 // Conditions returns the action conditions for the PMCProcess.
 func (pmc *PMCProcess) Conditions() map[process.Action]process.Condition {
 	return pmc.conditions

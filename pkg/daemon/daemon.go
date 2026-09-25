@@ -159,8 +159,6 @@ type Daemon struct {
 	syncStatusMu      sync.Mutex
 }
 
-type initialStateSyncer interface{ SyncInitialState() }
-
 // UpdateHardwareConfig implements controller.HardwareConfigUpdateHandler.
 // It is invoked by the controller reconciler via HardwareConfigHandler
 // (wired in cmd/main.go) to push the effective hardware configuration

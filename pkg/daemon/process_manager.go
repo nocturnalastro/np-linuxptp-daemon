@@ -82,9 +82,7 @@ func (pm *ProcessManager) startProcess(ctx context.Context, p process.Process) {
 			pm.daemon.pluginManager.AfterRunPTPCommand(profile, p.Name())
 		}
 	}
-	if syncer, ok := p.(initialStateSyncer); ok {
-		syncer.SyncInitialState()
-	}
+	p.SyncInitialState()
 }
 
 // StartProcesses initiates the event forwarding and starts processes with Immediate conditions.
