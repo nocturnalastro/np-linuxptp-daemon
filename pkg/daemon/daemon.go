@@ -895,6 +895,7 @@ func (dn *Daemon) applyNodePTPProfiles() error {
 	}
 
 	glog.Infof("All profiles applied, starting %d processes", len(dn.processManager.process))
+	var initialStateSyncers []initialStateSyncer
 	// Reset the live gate BEFORE starting processes so that socket-writers
 	// block until /emit-logs completes replay after the sidecar restart.
 	dn.liveGate.Reset()
@@ -920,12 +921,10 @@ func (dn *Daemon) applyNodePTPProfiles() error {
 						},
 						InitialPTPState: event.PTP_FREERUN,
 					})
-					// Pre-populate event state immediately after the EventChannel
-					// is set up so that hardware-slaved DPLLs (e.g. E830 CF) are
-					// present in the event data before the async monitoring goroutine
-					// completes its own initial dump.
+					// Queue initial DPLL state until profile application ends, when BC events
+					// are no longer discarded by the event handler.
 					if syncer, ok := d.(initialStateSyncer); ok {
-						syncer.SyncInitialState()
+						initialStateSyncers = append(initialStateSyncers, syncer)
 					}
 					glog.Infof("enabling dep process %s with Max %d Min %d Holdover %d", d.Name(), p.ptpClockThreshold.MaxOffsetThreshold, p.ptpClockThreshold.MinOffsetThreshold, p.ptpClockThreshold.HoldOverTimeout)
 				}
@@ -958,7 +957,15 @@ func (dn *Daemon) applyNodePTPProfiles() error {
 	*dn.refreshNodePtpDevice = true
 	dn.readyTracker.setConfig(true)
 	if dn.stdoutToSocket {
-		return dn.sendSidecarRestart()
+		if err := dn.sendSidecarRestart(); err != nil {
+			return err
+		}
+	}
+	if dn.processManager != nil && dn.processManager.ptpEventHandler != nil {
+		dn.processManager.ptpEventHandler.SetApplying(false)
+	}
+	for _, syncer := range initialStateSyncers {
+		syncer.SyncInitialState()
 	}
 	return nil
 }
