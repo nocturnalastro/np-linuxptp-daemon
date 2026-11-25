@@ -27,6 +27,13 @@ type OsClock struct {
 	filterConfigured bool
 }
 
+// NewOSClock creates an OS clock for a single profile generation.
+func NewOSClock(profileGeneration uint64) *OsClock {
+	o := &OsClock{DataHolder: DataHolder{profileGeneration: profileGeneration}}
+	o.Reset()
+	return o
+}
+
 // ConfigureFilter starts a fresh phc2sys filter with the resolved profile settings.
 func (o *OsClock) ConfigureFilter(cfg OSClockFilterConfig) {
 	o.filter.Config(cfg.InSyncThreshold, cfg.OutOfSyncThreshold, cfg.Samples, cfg.Samples)
@@ -59,6 +66,9 @@ func (o *OsClock) GetData(source event.EventSource) *event.Data {
 // It returns true when the event was accepted, even during debounce or when the
 // state is unchanged. Rejected events remain available for normal clock routing.
 func (o *OsClock) AddEvent(ev event.Event) bool {
+	if !o.acceptsEvent(ev) {
+		return false
+	}
 	if status, ok := ev.Data.(*event.ProcessStatusData); ok && ev.Source == event.PHC2SYS && status.Status == 0 {
 		o.filter.Reset()
 		o.filteredState = event.PTP_NOTSET

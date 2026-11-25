@@ -368,7 +368,7 @@ func (d *DpllConfig) emitProcessStatus(status int64) {
 	if d.processConfig.EventChannel == nil {
 		return
 	}
-	d.processConfig.EventChannel <- event.ProcessStatusEvent(event.DPLL, d.processConfig.ConfigName, d.processConfig.ClockType, d.iface, status)
+	d.processConfig.EventChannel <- event.ProcessStatusEvent(event.DPLL, d.processConfig.ConfigName, d.processConfig.ClockType, d.iface, status, d.processConfig.ProfileGeneration)
 }
 
 // Start begins DPLL monitoring.
@@ -691,12 +691,13 @@ func (d *DpllConfig) MonitorDpllNetlink() {
 			glog.Infof("terminating netlink dpll monitoring")
 			select {
 			case d.processConfig.EventChannel <- event.Event{
-				Source:    event.DPLL,
-				IFace:     d.iface,
-				CfgName:   d.processConfig.ConfigName,
-				ClockType: d.processConfig.ClockType,
-				Time:      time.Now().UnixMilli(),
-				Reset:     true,
+				ProfileGeneration: d.processConfig.ProfileGeneration,
+				Source:            event.DPLL,
+				IFace:             d.iface,
+				CfgName:           d.processConfig.ConfigName,
+				ClockType:         d.processConfig.ClockType,
+				Time:              time.Now().UnixMilli(),
+				Reset:             true,
 			}:
 			default:
 				glog.Error("failed to send dpll event terminated event")
@@ -872,14 +873,15 @@ func (d *DpllConfig) sendDpllEvent() {
 		dpllData.Offset = utils.ToPtr[int64](d.phaseOffset)
 	}
 	eventData := event.Event{
-		Source:     event.DPLL,
-		IFace:      d.iface,
-		CfgName:    d.processConfig.ConfigName,
-		ClockType:  d.processConfig.ClockType,
-		Time:       time.Now().UnixMilli(),
-		WriteToLog: true,
-		Reset:      false,
-		Data:       dpllData,
+		ProfileGeneration: d.processConfig.ProfileGeneration,
+		Source:            event.DPLL,
+		IFace:             d.iface,
+		CfgName:           d.processConfig.ConfigName,
+		ClockType:         d.processConfig.ClockType,
+		Time:              time.Now().UnixMilli(),
+		WriteToLog:        true,
+		Reset:             false,
+		Data:              dpllData,
 	}
 	select {
 	case d.processConfig.EventChannel <- eventData:

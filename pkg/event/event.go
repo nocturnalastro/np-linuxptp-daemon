@@ -420,35 +420,38 @@ const (
 // Event carries a process event on the event channel.
 // Common fields are inline; type-specific data is in Data.
 type Event struct {
-	Source     EventSource // ptp4l, gnss, dpll, etc.
-	IFace      string      // interface that is causing the event
-	CfgName    string      // ptp config profile name
-	ClockType  ClockType   // oc bc gm
-	Time       int64       // time.Now().UnixMilli()
-	WriteToLog bool
-	Reset      bool      // reset data on ptp deletes or process died
-	Data       EventData // typed payload, or nil for reset events
+	ProfileGeneration uint64
+	Source            EventSource // ptp4l, gnss, dpll, etc.
+	IFace             string      // interface that is causing the event
+	CfgName           string      // ptp config profile name
+	ClockType         ClockType   // oc bc gm
+	Time              int64       // time.Now().UnixMilli()
+	WriteToLog        bool
+	Reset             bool      // reset data on ptp deletes or process died
+	Data              EventData // typed payload, or nil for reset events
 }
 
 // ProcessStatusEvent is a process Up/Down event. status is 0 (down) or 1 (up).
-func ProcessStatusEvent(source EventSource, cfgName string, clockType ClockType, iface string, status int64) Event {
+func ProcessStatusEvent(source EventSource, cfgName string, clockType ClockType, iface string, status int64, profileGeneration uint64) Event {
 	return Event{
-		Source:     source,
-		IFace:      iface,
-		CfgName:    cfgName,
-		ClockType:  clockType,
-		Time:       time.Now().UnixMilli(),
-		WriteToLog: true,
-		Data:       &ProcessStatusData{Status: status},
+		ProfileGeneration: profileGeneration,
+		Source:            source,
+		IFace:             iface,
+		CfgName:           cfgName,
+		ClockType:         clockType,
+		Time:              time.Now().UnixMilli(),
+		WriteToLog:        true,
+		Data:              &ProcessStatusData{Status: status},
 	}
 }
 
 // PluginEvent creates an event emitted by a plugin.
-func PluginEvent(source EventSource, eventName string) Event {
+func PluginEvent(source EventSource, eventName string, profileGeneration uint64) Event {
 	return Event{
-		Source: source,
-		Time:   time.Now().UnixMilli(),
-		Data:   &PluginData{EventName: eventName},
+		ProfileGeneration: profileGeneration,
+		Source:            source,
+		Time:              time.Now().UnixMilli(),
+		Data:              &PluginData{EventName: eventName},
 	}
 }
 

@@ -149,11 +149,12 @@ func processParsedMetrics(process *ptpProcess, ptpMetrics *parser.Metrics) {
 		if (process.clockType == event.BC || process.clockType == event.OC) && masterIfaceResolved && ptpMetrics.Iface != master {
 			select {
 			case process.eventCh <- event.Event{
-				Source:    event.PTP4l,
-				CfgName:   configName,
-				IFace:     ptpMetrics.Iface,
-				ClockType: process.clockType,
-				Time:      time.Now().UnixMilli(),
+				ProfileGeneration: process.profileGeneration,
+				Source:            event.PTP4l,
+				CfgName:           configName,
+				IFace:             ptpMetrics.Iface,
+				ClockType:         process.clockType,
+				Time:              time.Now().UnixMilli(),
 				Data: &event.OffsetData{
 					State:  state,
 					Offset: int64(ptpMetrics.Offset),
@@ -180,25 +181,27 @@ func processParsedMetrics(process *ptpProcess, ptpMetrics *parser.Metrics) {
 		}
 		select {
 		case process.eventCh <- event.Event{
-			Source:     event.TS2PHC,
-			CfgName:    configName,
-			IFace:      ptpMetrics.Iface, // use real interface name in event/log
-			ClockType:  process.clockType,
-			Time:       time.Now().UnixMilli(),
-			WriteToLog: eventSource == event.GNSS,
-			Reset:      false,
-			Data:       data,
+			ProfileGeneration: process.profileGeneration,
+			Source:            event.TS2PHC,
+			CfgName:           configName,
+			IFace:             ptpMetrics.Iface, // use real interface name in event/log
+			ClockType:         process.clockType,
+			Time:              time.Now().UnixMilli(),
+			WriteToLog:        eventSource == event.GNSS,
+			Reset:             false,
+			Data:              data,
 		}:
 		default:
 		}
 	case event.Phc2SysProcessName:
 		select {
 		case process.eventCh <- event.Event{
-			Source:    event.PHC2SYS,
-			CfgName:   configName,
-			IFace:     ptpMetrics.Iface,
-			ClockType: process.clockType,
-			Time:      time.Now().UnixMilli(),
+			ProfileGeneration: process.profileGeneration,
+			Source:            event.PHC2SYS,
+			CfgName:           configName,
+			IFace:             ptpMetrics.Iface,
+			ClockType:         process.clockType,
+			Time:              time.Now().UnixMilli(),
 			Data: &event.OffsetData{
 				State:  state,
 				Offset: int64(ptpMetrics.Offset),
@@ -209,11 +212,12 @@ func processParsedMetrics(process *ptpProcess, ptpMetrics *parser.Metrics) {
 	case event.ChronydProcessName:
 		select {
 		case process.eventCh <- event.Event{
-			Source:    event.CHRONYD,
-			CfgName:   configName,
-			IFace:     ptpMetrics.Iface,
-			ClockType: process.clockType,
-			Time:      time.Now().UnixMilli(),
+			ProfileGeneration: process.profileGeneration,
+			Source:            event.CHRONYD,
+			CfgName:           configName,
+			IFace:             ptpMetrics.Iface,
+			ClockType:         process.clockType,
+			Time:              time.Now().UnixMilli(),
 			Data: &event.OffsetData{
 				State:  state,
 				Offset: int64(ptpMetrics.Offset),
@@ -270,12 +274,13 @@ func processPtp4lEvent(process *ptpProcess, ptpEvent *parser.PTPEvent) {
 					// clock_state here — clockmgr emits it from the BCClock verdict.
 					select {
 					case process.eventCh <- event.Event{
-						Source:    event.PTP4l,
-						CfgName:   configName,
-						IFace:     interfaceName,
-						ClockType: process.clockType,
-						Time:      time.Now().UnixMilli(),
-						Data:      &event.OffsetData{SourceLost: true},
+						ProfileGeneration: process.profileGeneration,
+						Source:            event.PTP4l,
+						CfgName:           configName,
+						IFace:             interfaceName,
+						ClockType:         process.clockType,
+						Time:              time.Now().UnixMilli(),
+						Data:              &event.OffsetData{SourceLost: true},
 					}:
 					default:
 					}
@@ -303,12 +308,13 @@ func processPhc2sysSelectedSource(process *ptpProcess, ptpEvent *parser.PTPEvent
 	}
 	select {
 	case process.eventCh <- event.Event{
-		Source:    event.PHC2SYS,
-		CfgName:   configName,
-		IFace:     ptpEvent.Iface,
-		ClockType: process.clockType,
-		Time:      time.Now().UnixMilli(),
-		Data:      &event.SelectedSourceData{IFace: ptpEvent.Iface},
+		ProfileGeneration: process.profileGeneration,
+		Source:            event.PHC2SYS,
+		CfgName:           configName,
+		IFace:             ptpEvent.Iface,
+		ClockType:         process.clockType,
+		Time:              time.Now().UnixMilli(),
+		Data:              &event.SelectedSourceData{IFace: ptpEvent.Iface},
 	}:
 	default:
 	}

@@ -144,7 +144,7 @@ func TestClockManagerResetDeletesAggregateTBCOffsetMetric(t *testing.T) {
 		[]string{fromLabel, processLabel, nodeLabel, ifaceLabel},
 	)
 	cm := Init(nodeName, make(chan event.Event), offsetMetric, nil, nil, nil)
-	tbc, err := clock.NewTBC(cfgName, cm.GetUtcOffset, &pmc.MockClient{}, "")
+	tbc, err := clock.NewTBC(cfgName, 0, cm.GetUtcOffset, &pmc.MockClient{}, "")
 	require.NoError(t, err)
 	require.NoError(t, cm.AddClock(tbc))
 	const ifaceName = "tbc-reset-iface"
@@ -207,11 +207,11 @@ func (m *ClockManager) GetPTPState(source event.EventSource, cfgName string) eve
 func TestClockManager_AddHAClock(t *testing.T) {
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
 	th := event.PtpClockThreshold{MaxOffsetThreshold: 100, MinOffsetThreshold: -100}
-	bc1, err := clock.NewBC("ptp4l.0.config", false, th)
+	bc1, err := clock.NewBC("ptp4l.0.config", 0, false, th)
 	require.NoError(t, err)
-	bc2, err := clock.NewBC("ptp4l.1.config", false, th)
+	bc2, err := clock.NewBC("ptp4l.1.config", 0, false, th)
 	require.NoError(t, err)
-	ha, err := clock.NewHA("phc2sys.2.config",
+	ha, err := clock.NewHA("phc2sys.2.config", 0,
 		clock.HAMember{Profile: "bc1", Clock: bc1},
 		clock.HAMember{Profile: "bc2", Clock: bc2})
 	require.NoError(t, err)
@@ -239,11 +239,11 @@ func TestClockManager_HAClockClassPerMember(t *testing.T) {
 	cm := Init("test-node", evCh, nil, nil, clockClassMetric, nil)
 
 	th := event.PtpClockThreshold{MaxOffsetThreshold: 100, MinOffsetThreshold: -100}
-	bc1, err := clock.NewBC("ptp4l.0.config", false, th)
+	bc1, err := clock.NewBC("ptp4l.0.config", 0, false, th)
 	require.NoError(t, err)
-	bc2, err := clock.NewBC("ptp4l.1.config", false, th)
+	bc2, err := clock.NewBC("ptp4l.1.config", 0, false, th)
 	require.NoError(t, err)
-	ha, err := clock.NewHA("phc2sys.2.config",
+	ha, err := clock.NewHA("phc2sys.2.config", 0,
 		clock.HAMember{Profile: "bc1", Clock: bc1},
 		clock.HAMember{Profile: "bc2", Clock: bc2})
 	require.NoError(t, err)
@@ -279,7 +279,7 @@ func TestClockManager_HAClockClassPerMember(t *testing.T) {
 
 func TestClockManager_GetDataAndPTPState(t *testing.T) {
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
-	oc, err := clock.NewBC(testClockmgrPtp4lConfig, true, event.PtpClockThreshold{})
+	oc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(oc)
 	require.NoError(t, err)
@@ -308,7 +308,7 @@ func TestClockManager_EmitClockClassAndIPCCache(t *testing.T) {
 	cache := ipc.NewCache(10)
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, cache)
 	assert.Equal(t, cache, cm.ipcCache)
-	bc, err := clock.NewBC(testClockmgrPtp4lConfig, false, event.PtpClockThreshold{})
+	bc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, false, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(bc)
 	require.NoError(t, err)
@@ -338,7 +338,7 @@ func TestClockManager_EmitClockClassAndIPCCach_OC(t *testing.T) {
 	cache := ipc.NewCache(10)
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, cache)
 	assert.Equal(t, cache, cm.ipcCache)
-	bc, err := clock.NewBC(testClockmgrPtp4lConfig, true, event.PtpClockThreshold{})
+	bc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(bc)
 	require.NoError(t, err)
@@ -366,7 +366,7 @@ func TestClockManager_EmitClockClassAndIPCCach_OC(t *testing.T) {
 
 func TestClockManager_SnapshotStatsPrefersMatchingProcess(t *testing.T) {
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
-	bc1, err := clock.NewBC("ptp4l.0.config", true, event.PtpClockThreshold{})
+	bc1, err := clock.NewBC("ptp4l.0.config", 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(bc1)
 	require.NoError(t, err)
@@ -400,7 +400,7 @@ func TestClockManager_SnapshotStatsPrefersMatchingProcess(t *testing.T) {
 
 func TestClockManager_PHC2SYS_ReturnedViaProcessData(t *testing.T) {
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
-	clk, err := clock.NewBC("ptp4l.0.config", true, event.PtpClockThreshold{})
+	clk, err := clock.NewBC("ptp4l.0.config", 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(clk)
 	require.NoError(t, err)
@@ -448,7 +448,7 @@ func TestClockManager_PHC2SYS_ReturnedViaProcessData(t *testing.T) {
 func TestClockManager_PHC2SYS_ProcessEventsLoop(t *testing.T) {
 	evCh := make(chan event.Event, 10)
 	cm := Init("test-node", evCh, nil, nil, nil, nil)
-	oc, err := clock.NewBC("ptp4l.0.config", true, event.PtpClockThreshold{})
+	oc, err := clock.NewBC("ptp4l.0.config", 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(oc)
 	require.NoError(t, err)
@@ -488,17 +488,17 @@ func TestClockManager_PHC2SYS_ProcessEventsLoop(t *testing.T) {
 func TestClockManager_PHC2SYS_SharedAcrossMultipleClocks(t *testing.T) {
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
 
-	clk1, err := clock.NewBC("ptp4l.0.config", true, event.PtpClockThreshold{})
+	clk1, err := clock.NewBC("ptp4l.0.config", 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(clk1)
 	require.NoError(t, err)
 
-	clk2, err := clock.NewBC("ptp4l.1.config", true, event.PtpClockThreshold{})
+	clk2, err := clock.NewBC("ptp4l.1.config", 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(clk2)
 	require.NoError(t, err)
 
-	clk3, err := clock.NewBC("ptp4l.2.config", true, event.PtpClockThreshold{})
+	clk3, err := clock.NewBC("ptp4l.2.config", 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(clk3)
 	require.NoError(t, err)
@@ -535,7 +535,7 @@ func TestClockManager_PHC2SYS_SharedAcrossMultipleClocks(t *testing.T) {
 
 func TestClockManager_PHC2SYS_SnapshotStatsWithoutWindow(t *testing.T) {
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
-	clk, err := clock.NewBC("ptp4l.0.config", true, event.PtpClockThreshold{})
+	clk, err := clock.NewBC("ptp4l.0.config", 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(clk)
 	require.NoError(t, err)
@@ -577,7 +577,7 @@ func TestClockManager_PHC2SYS_SnapshotStatsWithoutWindow(t *testing.T) {
 
 func TestClockManager_PHC2SYS_RemoveAllClocksResetsData(t *testing.T) {
 	cm := Init("test-node", make(chan event.Event), nil, nil, nil, nil)
-	clk, err := clock.NewBC("ptp4l.1.config", true, event.PtpClockThreshold{})
+	clk, err := clock.NewBC("ptp4l.1.config", 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(clk)
 	require.NoError(t, err)
@@ -601,7 +601,7 @@ func TestClockManager_PHC2SYS_RemoveAllClocksResetsData(t *testing.T) {
 	cm.RemoveAllClocks()
 
 	// Re-add clock and verify ProcessData has no stale PHC2SYS data
-	newClk, err := clock.NewBC("ptp4l.1.config", true, event.PtpClockThreshold{})
+	newClk, err := clock.NewBC("ptp4l.1.config", 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	err = cm.AddClock(newClk)
 	require.NoError(t, err)
@@ -630,4 +630,58 @@ func TestConvertToFloat(t *testing.T) {
 
 	_, ok = convertToFloat("true")
 	assert.False(t, ok)
+}
+
+func TestProfileGeneration(t *testing.T) {
+	cache := ipc.NewCache(10)
+	m := Init("test-node", nil, nil, nil, nil, cache)
+	const cfg = testClockmgrPtp4lConfig
+	oldClock, err := clock.NewBC(cfg, 0, true, event.PtpClockThreshold{})
+	require.NoError(t, err)
+	require.NoError(t, m.AddClock(oldClock))
+	oldGeneration := oldClock.ProfileGeneration()
+	oldOSClock := m.osClock
+	oldEvent := event.Event{
+		ProfileGeneration: oldGeneration,
+		CfgName:           cfg,
+		IFace:             "eth0",
+		Source:            event.PTP4l,
+		Data:              &event.OffsetData{Offset: 12, State: event.PTP_LOCKED},
+	}
+
+	m.SetApplying(true)
+	require.Equal(t, oldGeneration+1, m.ProfileGeneration())
+	oldClock.AddEvent(oldEvent)
+	require.Empty(t, oldClock.ProcessData(), "retired clock still processed its own generation")
+
+	osEvent := oldEvent
+	osEvent.Source = event.PHC2SYS
+	osEvent.IFace = "CLOCK_REALTIME"
+	require.False(t, m.osClock.AddEvent(osEvent), "retired OS clock still accepted a sample")
+	cache.Send(ipc.Message{Type: ipc.TypeSyncState, Profile: cfg})
+	m.RemoveAllClocks()
+	require.Empty(t, cache.Snapshot(), "retired profile state remains in the IPC cache")
+	require.NotSame(t, oldOSClock, m.osClock)
+	require.Equal(t, oldGeneration, oldOSClock.ProfileGeneration())
+	require.Equal(t, oldGeneration+1, m.osClock.ProfileGeneration())
+	require.Error(t, m.AddClock(oldClock))
+	require.Equal(t, oldGeneration, oldClock.ProfileGeneration())
+	newClock, err := clock.NewBC(cfg, m.ProfileGeneration(), true, event.PtpClockThreshold{})
+	require.NoError(t, err)
+	require.NoError(t, m.AddClock(newClock))
+
+	m.ProcessEvent(oldEvent)
+	m.ProcessEvent(osEvent)
+	require.Empty(t, newClock.ProcessData())
+	require.Empty(t, m.osClock.ProcessData())
+	m.ProcessEvent(event.Event{ProfileGeneration: m.ProfileGeneration(), Source: oldEvent.Source, CfgName: cfg, IFace: oldEvent.IFace, Data: oldEvent.Data})
+	m.ProcessEvent(event.Event{ProfileGeneration: m.ProfileGeneration(), Source: osEvent.Source, CfgName: cfg, IFace: osEvent.IFace, Data: osEvent.Data})
+	require.NotEmpty(t, newClock.ProcessData())
+	require.Equal(t, int64(12), m.osClock.Offset)
+
+	m.SetApplying(false)
+	m.ProcessEvent(event.Event{CfgName: cfg, Reset: true, ProfileGeneration: oldGeneration})
+	require.NotEmpty(t, newClock.ProcessData(), "stale reset cleared the replacement clock")
+	m.SetApplying(true)
+	require.Equal(t, oldGeneration+2, m.ProfileGeneration())
 }

@@ -1,6 +1,8 @@
 package clock
 
 import (
+	"fmt"
+
 	fbprotocol "github.com/facebook/time/ptp/protocol"
 	"github.com/golang/glog"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/event"
@@ -49,15 +51,18 @@ type HAMember struct {
 // Members are routed to by their ConfigName(). cfgName is the HA profile's own
 // config name (the phc2sys-only HA profile), used when publishing the composite
 // sync state.
-func NewHA(cfgName string, members ...HAMember) (*HAClock, error) {
+func NewHA(cfgName string, profileGeneration uint64, members ...HAMember) (*HAClock, error) {
 	c := &HAClock{
-		BaseClock:      newBaseClock(cfgName, event.PtpClockThreshold{}),
+		BaseClock:      newBaseClock(cfgName, profileGeneration, event.PtpClockThreshold{}),
 		members:        map[string]*BCClock{},
 		memberProfiles: map[string]string{},
 		syncState:      event.PTP_NOTSET,
 	}
 	for _, m := range members {
 		cfg := m.Clock.ConfigName()
+		if m.Clock.ProfileGeneration() != profileGeneration {
+			return nil, fmt.Errorf("HA member clock %s has profile generation %d, want %d", cfg, m.Clock.ProfileGeneration(), profileGeneration)
+		}
 		c.members[cfg] = m.Clock
 		c.memberProfiles[cfg] = m.Profile
 	}
@@ -101,6 +106,13 @@ func (c *HAClock) SetOsClock(osClock *OsClock) {
 	c.BaseClock.SetOsClock(osClock)
 	for _, m := range c.members {
 		m.SetOsClock(osClock)
+	}
+}
+
+func (c *HAClock) StopEvents() {
+	c.BaseClock.StopEvents()
+	for _, member := range c.members {
+		member.StopEvents()
 	}
 }
 
@@ -156,6 +168,9 @@ func (c *HAClock) GetState() event.PTPState { return c.syncState }
 // recomputes the composite (best-of-members) state and reconciles the overall
 // (with-OS-clock) sync state.
 func (c *HAClock) AddEvent(ev event.Event) SyncState {
+	if !c.acceptsEvent(ev) {
+		return SyncState{State: c.syncState}
+	}
 	// A phc2sys source selection tells us which member is actively disciplining the
 	// system clock. It carries an interface, not a member config, so it is routed
 	// here by the HA phc2sys config name rather than a member config name. It only

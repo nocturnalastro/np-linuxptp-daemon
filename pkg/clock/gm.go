@@ -29,12 +29,12 @@ type GM struct {
 }
 
 // NewGM creates a new grandmaster clock
-func NewGM(cfgName string, getUTCOffset func() int, pmcClient pmc.Client) (*GM, error) {
+func NewGM(cfgName string, profileGeneration uint64, getUTCOffset func() int, pmcClient pmc.Client) (*GM, error) {
 	if pmcClient == nil {
 		return nil, fmt.Errorf("pmc.Client is required for clock type %s (config %s)", event.GM, cfgName)
 	}
 	return &GM{
-		BaseClock: newBaseClock(cfgName, event.PtpClockThreshold{}), // TODO: Populate thresholds.
+		BaseClock: newBaseClock(cfgName, profileGeneration, event.PtpClockThreshold{}), // TODO: Populate thresholds.
 		pmcClient: pmcClient,
 		syncState: SyncState{
 			State:         event.PTP_NOTSET,
@@ -82,6 +82,9 @@ func (c *GM) Reset() {
 
 // AddEvent processes an event and updates clock state.
 func (c *GM) AddEvent(ev event.Event) SyncState {
+	if !c.acceptsEvent(ev) {
+		return c.syncState
+	}
 	if ev.Source == event.PMC {
 		return c.syncState
 	}

@@ -46,7 +46,7 @@ func TestStatsUpdatesPushUnchangedStates(t *testing.T) {
 
 func TestStatsUpdatesRetainLatestForSlowOrLateManager(t *testing.T) {
 	m := clockmgr.Init("test-node", make(chan event.Event), nil, nil, nil, nil)
-	bc, err := clock.NewBC(testClockmgrPtp4lConfig, true, event.PtpClockThreshold{MaxOffsetThreshold: 100, MinOffsetThreshold: -100})
+	bc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, true, event.PtpClockThreshold{MaxOffsetThreshold: 100, MinOffsetThreshold: -100})
 	require.NoError(t, err)
 	require.NoError(t, m.AddClock(bc))
 	done := make(chan struct{})
@@ -72,7 +72,7 @@ func TestStatsUpdatesRetainLatestForSlowOrLateManager(t *testing.T) {
 func TestStatsUpdatesPushProcessedWindowSnapshots(t *testing.T) {
 	events := make(chan event.Event, 2)
 	m := clockmgr.Init("test-node", events, nil, nil, nil, nil)
-	bc, err := clock.NewBC(testClockmgrPtp4lConfig, true, event.PtpClockThreshold{MaxOffsetThreshold: 100, MinOffsetThreshold: -100})
+	bc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, true, event.PtpClockThreshold{MaxOffsetThreshold: 100, MinOffsetThreshold: -100})
 	require.NoError(t, err)
 	require.NoError(t, m.AddClock(bc))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -97,7 +97,7 @@ func TestStatsUpdatesPushProcessedWindowSnapshots(t *testing.T) {
 
 func TestStatsUpdatesPushInvalidations(t *testing.T) {
 	m := clockmgr.Init("test-node", make(chan event.Event), nil, nil, nil, nil)
-	bc, err := clock.NewBC(testClockmgrPtp4lConfig, true, event.PtpClockThreshold{})
+	bc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	require.NoError(t, m.AddClock(bc))
 	updates := m.StatsUpdatesCh()

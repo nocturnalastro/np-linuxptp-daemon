@@ -33,7 +33,7 @@ func TestOSClock_FilteredSnapshotsAndE3(t *testing.T) {
 	cache := ipc.NewCache(100)
 	m := clockmgr.Init("test-node", make(chan event.Event), nil, nil, nil, cache)
 	m.ConfigureOSClockFilter(clock.OSClockFilterConfig{InSyncThreshold: 50, OutOfSyncThreshold: 100, Samples: 2})
-	bc, err := clock.NewBC(testClockmgrPtp4lConfig, false, event.PtpClockThreshold{MinOffsetThreshold: -100, MaxOffsetThreshold: 100})
+	bc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, false, event.PtpClockThreshold{MinOffsetThreshold: -100, MaxOffsetThreshold: 100})
 	require.NoError(t, err)
 	require.NoError(t, m.AddClock(bc))
 	m.ProcessEvent(event.Event{Source: event.PTP4l, CfgName: testClockmgrPtp4lConfig, IFace: "eth0", Data: &event.OffsetData{State: event.PTP_LOCKED, Offset: 10}})
@@ -76,7 +76,7 @@ func TestOSClock_Phc2sysDownEmitsFreerun(t *testing.T) {
 	cache := ipc.NewCache(20)
 	m := clockmgr.Init("test-node", make(chan event.Event), nil, nil, nil, cache)
 	m.ConfigureOSClockFilter(clock.OSClockFilterConfig{InSyncThreshold: 50, OutOfSyncThreshold: 100, Samples: 2})
-	bc, err := clock.NewBC(testClockmgrPtp4lConfig, false, event.PtpClockThreshold{MinOffsetThreshold: -100, MaxOffsetThreshold: 100})
+	bc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, false, event.PtpClockThreshold{MinOffsetThreshold: -100, MaxOffsetThreshold: 100})
 	require.NoError(t, err)
 	require.NoError(t, m.AddClock(bc))
 	m.ProcessEvent(event.Event{Source: event.PTP4l, CfgName: testClockmgrPtp4lConfig, IFace: "eth0", Data: &event.OffsetData{State: event.PTP_LOCKED, Offset: 10}})
@@ -86,7 +86,7 @@ func TestOSClock_Phc2sysDownEmitsFreerun(t *testing.T) {
 	m.ProcessEvent(sample)
 	osClockMessages(cache)
 
-	m.ProcessEvent(event.ProcessStatusEvent(event.PHC2SYS, cfg, event.BC, "", 0))
+	m.ProcessEvent(event.ProcessStatusEvent(event.PHC2SYS, cfg, event.BC, "", 0, 0))
 	msgs := osClockMessages(cache)
 	require.Len(t, msgs, 1)
 	assert.Equal(t, event.PtpStateToIPCState(event.PTP_FREERUN), msgs[0].Values.(ipc.StateValue).State)
@@ -136,11 +136,11 @@ func TestOSClock_ReportsWithoutRegisteredClocksAndAfterReset(t *testing.T) {
 func TestStatsUpdates_HAMemberSourceIdentity(t *testing.T) {
 	m := clockmgr.Init("test-node", make(chan event.Event), nil, nil, nil, nil)
 	th := event.PtpClockThreshold{MinOffsetThreshold: -100, MaxOffsetThreshold: 100}
-	first, err := clock.NewBC("ptp4l.0.config", false, th)
+	first, err := clock.NewBC("ptp4l.0.config", 0, false, th)
 	require.NoError(t, err)
-	second, err := clock.NewBC("ptp4l.1.config", false, th)
+	second, err := clock.NewBC("ptp4l.1.config", 0, false, th)
 	require.NoError(t, err)
-	ha, err := clock.NewHA("phc2sys.2.config", clock.HAMember{Profile: "first", Clock: first}, clock.HAMember{Profile: "second", Clock: second})
+	ha, err := clock.NewHA("phc2sys.2.config", 0, clock.HAMember{Profile: "first", Clock: first}, clock.HAMember{Profile: "second", Clock: second})
 	require.NoError(t, err)
 	require.NoError(t, m.AddClock(ha))
 	for _, ev := range []event.Event{
@@ -163,7 +163,7 @@ func TestStatsUpdates_HAMemberSourceIdentity(t *testing.T) {
 
 func TestStatsUpdates_WindowAvailabilityIsIndependentOfSource(t *testing.T) {
 	m := clockmgr.Init("test-node", make(chan event.Event), nil, nil, nil, nil)
-	bc, err := clock.NewBC(testClockmgrPtp4lConfig, true, event.PtpClockThreshold{})
+	bc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, true, event.PtpClockThreshold{})
 	require.NoError(t, err)
 	require.NoError(t, m.AddClock(bc))
 
@@ -189,7 +189,7 @@ func TestOSClock_UnchangedSamplesDoNotFallThrough(t *testing.T) {
 		t.Run(string(source), func(t *testing.T) {
 			m := clockmgr.Init("test-node", make(chan event.Event), nil, nil, nil, nil)
 			m.ConfigureOSClockFilter(clock.OSClockFilterConfig{InSyncThreshold: 50, OutOfSyncThreshold: 100, Samples: 2})
-			bc, err := clock.NewBC(testClockmgrPtp4lConfig, true, event.PtpClockThreshold{MinOffsetThreshold: -100, MaxOffsetThreshold: 100})
+			bc, err := clock.NewBC(testClockmgrPtp4lConfig, 0, true, event.PtpClockThreshold{MinOffsetThreshold: -100, MaxOffsetThreshold: 100})
 			require.NoError(t, err)
 			require.NoError(t, m.AddClock(bc))
 			m.ProcessEvent(event.Event{Source: event.PTP4l, CfgName: testClockmgrPtp4lConfig, IFace: "eth0", Data: &event.OffsetData{State: event.PTP_LOCKED, Offset: 10}})
@@ -209,11 +209,11 @@ func TestOSClock_UnchangedSamplesDoNotFallThrough(t *testing.T) {
 func TestOSClock_HASelectionContinuesToHAClock(t *testing.T) {
 	m := clockmgr.Init("test-node", make(chan event.Event), nil, nil, nil, nil)
 	th := event.PtpClockThreshold{MinOffsetThreshold: -100, MaxOffsetThreshold: 100}
-	first, err := clock.NewBC("ptp4l.0.config", false, th)
+	first, err := clock.NewBC("ptp4l.0.config", 0, false, th)
 	require.NoError(t, err)
-	second, err := clock.NewBC("ptp4l.1.config", false, th)
+	second, err := clock.NewBC("ptp4l.1.config", 0, false, th)
 	require.NoError(t, err)
-	ha, err := clock.NewHA("phc2sys.2.config", clock.HAMember{Profile: "first", Clock: first}, clock.HAMember{Profile: "second", Clock: second})
+	ha, err := clock.NewHA("phc2sys.2.config", 0, clock.HAMember{Profile: "first", Clock: first}, clock.HAMember{Profile: "second", Clock: second})
 	require.NoError(t, err)
 	require.NoError(t, m.AddClock(ha))
 	for i, member := range []*clock.BCClock{first, second} {

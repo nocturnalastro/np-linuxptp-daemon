@@ -70,13 +70,13 @@ func TestOnProcessUp(t *testing.T) {
 	p := &stubProc{}
 	c := OnProcessUp{Source: event.PTP4l, ConfigName: ttestPtp4lConditions}
 	assert.False(t, c.Met(p, event.Event{}, EventStats{}))
-	up := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 1)
+	up := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 1, 0)
 	assert.True(t, c.Met(p, up, EventStats{}))
-	down := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 0)
+	down := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 0, 0)
 	assert.False(t, c.Met(p, down, EventStats{}))
-	wrongSrc := event.ProcessStatusEvent(event.GPSD, ttestPtp4lConditions, event.OC, "", 1)
+	wrongSrc := event.ProcessStatusEvent(event.GPSD, ttestPtp4lConditions, event.OC, "", 1, 0)
 	assert.False(t, c.Met(p, wrongSrc, EventStats{}))
-	wrongCfg := event.ProcessStatusEvent(event.PTP4l, "other.config", event.OC, "", 1)
+	wrongCfg := event.ProcessStatusEvent(event.PTP4l, "other.config", event.OC, "", 1, 0)
 	assert.False(t, c.Met(p, wrongCfg, EventStats{}))
 	reset := event.Event{Source: event.PTP4l, CfgName: ttestPtp4lConditions, Reset: true}
 	assert.False(t, c.Met(p, reset, EventStats{}))
@@ -88,8 +88,8 @@ func TestAll(t *testing.T) {
 		OnProcessUp{Source: event.PTP4l},
 		OnProcessUp{Source: event.GPSD},
 	}}
-	assert.False(t, c.Met(p, event.ProcessStatusEvent(event.PTP4l, "", event.OC, "", 1), EventStats{}))
-	both := event.ProcessStatusEvent(event.PTP4l, "", event.OC, "", 1)
+	assert.False(t, c.Met(p, event.ProcessStatusEvent(event.PTP4l, "", event.OC, "", 1, 0), EventStats{}))
+	both := event.ProcessStatusEvent(event.PTP4l, "", event.OC, "", 1, 0)
 	// All requires every nested condition on the same event; a ptp4l Up is not gpsd Up.
 	assert.False(t, c.Met(p, both, EventStats{}))
 	empty := All{}
@@ -100,14 +100,14 @@ func TestImmediateAlwaysTrue(t *testing.T) {
 	p := &stubProc{}
 	var c Immediate
 	assert.True(t, c.Met(p, event.Event{}, EventStats{}))
-	assert.True(t, c.Met(p, event.ProcessStatusEvent(event.PTP4l, "x", event.OC, "", 0), EventStats{}))
+	assert.True(t, c.Met(p, event.ProcessStatusEvent(event.PTP4l, "x", event.OC, "", 0, 0), EventStats{}))
 }
 
 func TestNeverAlwaysFalse(t *testing.T) {
 	p := &stubProc{}
 	var c Never
 	assert.False(t, c.Met(p, event.Event{}, EventStats{}))
-	assert.False(t, c.Met(p, event.ProcessStatusEvent(event.PTP4l, "x", event.OC, "", 1), EventStats{}))
+	assert.False(t, c.Met(p, event.ProcessStatusEvent(event.PTP4l, "x", event.OC, "", 1, 0), EventStats{}))
 	assert.Equal(t, "Never", c.String())
 }
 
@@ -115,14 +115,14 @@ func TestOnPluginEvent(t *testing.T) {
 	p := &stubProc{}
 	c := OnPluginEvent{EventName: generic.GnssFailoverEventName}
 
-	failover := event.PluginEvent("ntpfailover", generic.GnssFailoverEventName)
+	failover := event.PluginEvent("ntpfailover", generic.GnssFailoverEventName, 0)
 	assert.True(t, c.Met(p, failover, EventStats{}))
 
-	recovered := event.PluginEvent("ntpfailover", generic.GnssRecoveredEventName)
+	recovered := event.PluginEvent("ntpfailover", generic.GnssRecoveredEventName, 0)
 	assert.False(t, c.Met(p, recovered, EventStats{}))
 
 	// Non-PluginData event should not match
-	processUp := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 1)
+	processUp := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 1, 0)
 	assert.False(t, c.Met(p, processUp, EventStats{}))
 
 	// Empty event should not match
@@ -133,16 +133,16 @@ func TestOnProcessDown(t *testing.T) {
 	p := &stubProc{}
 	c := OnProcessDown{Source: event.PTP4l, ConfigName: ttestPtp4lConditions}
 
-	down := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 0)
+	down := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 0, 0)
 	assert.True(t, c.Met(p, down, EventStats{}))
 
-	up := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 1)
+	up := event.ProcessStatusEvent(event.PTP4l, ttestPtp4lConditions, event.OC, "", 1, 0)
 	assert.False(t, c.Met(p, up, EventStats{}))
 
-	wrongSrc := event.ProcessStatusEvent(event.GPSD, ttestPtp4lConditions, event.OC, "", 0)
+	wrongSrc := event.ProcessStatusEvent(event.GPSD, ttestPtp4lConditions, event.OC, "", 0, 0)
 	assert.False(t, c.Met(p, wrongSrc, EventStats{}))
 
-	wrongCfg := event.ProcessStatusEvent(event.PTP4l, "other.config", event.OC, "", 0)
+	wrongCfg := event.ProcessStatusEvent(event.PTP4l, "other.config", event.OC, "", 0, 0)
 	assert.False(t, c.Met(p, wrongCfg, EventStats{}))
 
 	// Non-ProcessStatus event should not match
@@ -179,11 +179,11 @@ func TestAny(t *testing.T) {
 	assert.True(t, c.Met(p, locked, stats))
 
 	// Plugin event satisfies second condition
-	recovered := event.PluginEvent("ntpfailover", generic.GnssRecoveredEventName)
+	recovered := event.PluginEvent("ntpfailover", generic.GnssRecoveredEventName, 0)
 	assert.True(t, c.Met(p, recovered, EventStats{}))
 
 	// Neither condition met
-	wrongPlugin := event.PluginEvent("ntpfailover", generic.GnssFailoverEventName)
+	wrongPlugin := event.PluginEvent("ntpfailover", generic.GnssFailoverEventName, 0)
 	assert.False(t, c.Met(p, wrongPlugin, EventStats{}))
 
 	// Empty Any is false
@@ -290,7 +290,7 @@ func TestAllReconciliationRechecksReadinessAndRetainsEventPrerequisite(t *testin
 	}}
 	stats := EventStats{States: map[string]map[event.EventSource]event.PTPState{ttestPtp4lConditions: {event.PHC2SYS: event.PTP_LOCKED}}}
 	assert.False(t, gate.MetByCurrentState(p, nil, stats), "the plugin event cannot be synthesized")
-	assert.False(t, gate.Met(p, event.PluginEvent("plugin", "ready"), EventStats{}), "an event alone cannot supply clock readiness")
+	assert.False(t, gate.Met(p, event.PluginEvent("plugin", "ready", 0), EventStats{}), "an event alone cannot supply clock readiness")
 	stats.States[ttestPtp4lConditions][event.PHC2SYS] = event.PTP_FREERUN
 	assert.False(t, gate.MetByCurrentState(p, nil, stats), "old LOCKED must not remain latched")
 	stats.States[ttestPtp4lConditions][event.PHC2SYS] = event.PTP_LOCKED
@@ -304,6 +304,6 @@ func TestAnyReconciliationDoesNotReplayPluginEvents(t *testing.T) {
 		OnProcessState{ConfigName: ttestPtp4lConditions, Source: string(event.PHC2SYS), State: event.PTP_LOCKED},
 		OnPluginEvent{EventName: "ready"},
 	}}
-	assert.True(t, gate.Met(p, event.PluginEvent("plugin", "ready"), EventStats{}))
+	assert.True(t, gate.Met(p, event.PluginEvent("plugin", "ready", 0), EventStats{}))
 	assert.False(t, gate.MetByCurrentState(p, nil, EventStats{}), "reconciliation must not replay the transient event")
 }

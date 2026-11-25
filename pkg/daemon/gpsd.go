@@ -256,7 +256,7 @@ func (g *GPSD) run() {
 				glog.Infof("Process %s exited unexpectedly", g.name)
 			}
 			g.ProcessStatus(PtpProcessDown)
-			sendProcessStatusEvent(g.eventCh, event.GPSD, cfgNameFromMessageTag(g.messageTag), g.ClockType(), g.gmInterface, PtpProcessDown)
+			sendProcessStatusEvent(g.eventCh, event.GPSD, cfgNameFromMessageTag(g.messageTag), g.ClockType(), g.gmInterface, PtpProcessDown, g.processConfig.ProfileGeneration)
 		}()
 
 		g.execMutex.RLock()
@@ -286,7 +286,7 @@ func (g *GPSD) run() {
 			g.state = process.Running
 			g.execMutex.Unlock()
 			g.ProcessStatus(PtpProcessUp)
-			sendProcessStatusEvent(g.eventCh, event.GPSD, cfgNameFromMessageTag(g.messageTag), g.ClockType(), g.gmInterface, PtpProcessUp)
+			sendProcessStatusEvent(g.eventCh, event.GPSD, cfgNameFromMessageTag(g.messageTag), g.ClockType(), g.gmInterface, PtpProcessUp, g.processConfig.ProfileGeneration)
 		}
 
 		err = cmd.Wait()
@@ -333,11 +333,12 @@ func (g *GPSD) monitorGNSSEventsWithUblox() {
 	go func() {
 		defer g.wg.Done()
 		defer g.sendGNSSEvent(event.Event{
-			Source:    event.GNSS,
-			CfgName:   g.ConfigName(),
-			ClockType: g.gnssClockType(),
-			Time:      time.Now().UnixMilli(),
-			Reset:     true,
+			ProfileGeneration: g.processConfig.ProfileGeneration,
+			Source:            event.GNSS,
+			CfgName:           g.ConfigName(),
+			ClockType:         g.gnssClockType(),
+			Time:              time.Now().UnixMilli(),
+			Reset:             true,
 		})
 
 		for {
@@ -465,13 +466,14 @@ func (g *GPSD) checkForiTOWCorrelation() bool {
 	// the clock cannot remain locked to potentially forged time.
 	g.sourceLost = status.GPSFix < 3 || status.SpoofingDetected() || !g.isOffsetInRange()
 	g.sendGNSSEvent(event.Event{
-		Source:     event.GNSS,
-		CfgName:    g.ConfigName(),
-		IFace:      g.gmInterface,
-		ClockType:  g.gnssClockType(),
-		Time:       time.Now().UnixMilli(),
-		WriteToLog: true,
-		Reset:      false,
+		ProfileGeneration: g.processConfig.ProfileGeneration,
+		Source:            event.GNSS,
+		CfgName:           g.ConfigName(),
+		IFace:             g.gmInterface,
+		ClockType:         g.gnssClockType(),
+		Time:              time.Now().UnixMilli(),
+		WriteToLog:        true,
+		Reset:             false,
 		Data: &event.GNSSData{
 			GPSStatus:  status.GPSFix,
 			Offset:     g.offset,

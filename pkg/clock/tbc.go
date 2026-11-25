@@ -94,12 +94,12 @@ type TBC struct {
 }
 
 // NewTBC creates a new Telecom Boundary clock
-func NewTBC(cfgName string, getUtcOffset func() int, pmcClient pmc.Client, controlledProfile string) (*TBC, error) {
+func NewTBC(cfgName string, profileGeneration uint64, getUtcOffset func() int, pmcClient pmc.Client, controlledProfile string) (*TBC, error) {
 	if pmcClient == nil {
 		return nil, fmt.Errorf("pmc.Client is required for clock type %s (config %s)", event.TBC, cfgName)
 	}
 	return &TBC{
-		BaseClock:    newBaseClock(cfgName, event.PtpClockThreshold{}),
+		BaseClock:    newBaseClock(cfgName, profileGeneration, event.PtpClockThreshold{}),
 		getUtcOffset: getUtcOffset,
 		pmcClient:    pmcClient,
 		syncState: SyncState{
@@ -177,6 +177,9 @@ func (c *TBC) SourceQualification(cfg string) (event.SourceQualification, bool) 
 
 // AddEvent processes an event and updates clock state.
 func (c *TBC) AddEvent(ev event.Event) SyncState {
+	if !c.acceptsEvent(ev) {
+		return c.syncState
+	}
 	switch ev.Source {
 	case event.SYNCE:
 		c.processSyncE(ev)
@@ -204,7 +207,7 @@ func (c *TBC) AddEvent(ev event.Event) SyncState {
 // last selected port remains identifiable during loss; availability is separate.
 func (c *TBC) ObserveSource(ev event.Event, observation *event.PTPSourceObservation) event.SourceQualification {
 	q := c.ptpSource
-	if q == nil || ev.Source != event.PTP4l || ev.CfgName != c.cfgName || observation.Generation != q.generation {
+	if !c.acceptsEvent(ev) || q == nil || ev.Source != event.PTP4l || ev.CfgName != c.cfgName || observation.Generation != q.generation {
 		return event.SourceQualification{}
 	}
 	var result utils.QualificationResult
@@ -553,11 +556,12 @@ func (c *TBC) downstreamAnnounceIWF(cfgName string, generation uint64) {
 
 	// when results are eventually received, send an event back to the queue to be handled by the state machine
 	c.sendEvent(event.Event{
-		Source:    event.PMC,
-		CfgName:   cfgName,
-		ClockType: event.TBC,
-		Time:      time.Now().UnixMilli(),
-		Data:      &event.ParentTimeCurrentDS{ParentTimeCurrentDS: upstreamData, Generation: generation},
+		ProfileGeneration: c.profileGeneration,
+		Source:            event.PMC,
+		CfgName:           cfgName,
+		ClockType:         event.TBC,
+		Time:              time.Now().UnixMilli(),
+		Data:              &event.ParentTimeCurrentDS{ParentTimeCurrentDS: upstreamData, Generation: generation},
 	})
 }
 

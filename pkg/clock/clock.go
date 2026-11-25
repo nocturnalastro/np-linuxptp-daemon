@@ -16,6 +16,8 @@ type OffsetSample struct {
 
 // Clock represents a PTP clock instance tied to a specific config profile.
 type Clock interface {
+	ProfileGeneration() uint64
+	StopEvents()
 	AddEvent(ev event.Event) SyncState
 	GetState() event.PTPState
 	SystemClockUpdate()

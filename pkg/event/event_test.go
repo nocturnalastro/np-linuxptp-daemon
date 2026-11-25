@@ -279,7 +279,7 @@ func TestEventHandler_ProcessEvents(t *testing.T) {
 	eventManager := clockmgr.Init("node", eChannel, nil, nil, nil, nil)
 	startLeapManager(t)
 	startEventProcessor(t, eventManager)
-	gmClk, err := clock.NewGM("ts2phc.0.config", leap.GetUtcOffset, pmcMock)
+	gmClk, err := clock.NewGM("ts2phc.0.config", 0, leap.GetUtcOffset, pmcMock)
 	require.NoError(t, err)
 	addErr := eventManager.AddClock(gmClk)
 	assert.NoError(t, addErr)
@@ -374,7 +374,7 @@ func TestTBCClockClassThroughProcessEvents(t *testing.T) {
 	eventManager := clockmgr.Init("testnode", eChannel, nil, nil, clockClassGauge, nil)
 	startEventProcessor(t, eventManager)
 
-	tbcClk, err := clock.NewTBC(testBCCfgPTP4l, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
+	tbcClk, err := clock.NewTBC(testBCCfgPTP4l, 0, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
 	require.NoError(t, err)
 	addErr := eventManager.AddClock(tbcClk)
 	assert.NoError(t, addErr)
@@ -526,7 +526,7 @@ func TestTBCClockClassMetric(t *testing.T) {
 	eventManager := clockmgr.Init("testnode", eChannel, offsetGauge, clockStateGauge, clockClassGauge, nil)
 	startEventProcessor(t, eventManager)
 
-	tbcClk, err := clock.NewTBC(testBCCfgPTP4l, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
+	tbcClk, err := clock.NewTBC(testBCCfgPTP4l, 0, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
 	require.NoError(t, err)
 	addErr := eventManager.AddClock(tbcClk)
 	assert.NoError(t, addErr)
@@ -717,13 +717,13 @@ func TestMultiClockIPCIsolation(t *testing.T) {
 	)
 
 	// Register GM clock
-	gmClk, err := clock.NewGM(gmCfg, leap.GetUtcOffset, pmcMock)
+	gmClk, err := clock.NewGM(gmCfg, 0, leap.GetUtcOffset, pmcMock)
 	require.NoError(t, err)
 	addErr := eventManager.AddClock(gmClk)
 	require.NoError(t, addErr)
 
 	// Register T-BC clock
-	tbcClk, err := clock.NewTBC(tbcPTP4l, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
+	tbcClk, err := clock.NewTBC(tbcPTP4l, 0, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
 	tbcClk.SetConfiguredLeadingInterface(tbcIface)
 
 	require.NoError(t, err)
@@ -1037,7 +1037,7 @@ func TestOverallClockStateIntegration(t *testing.T) {
 	defer cleanup()
 
 	// Register two TBCClocks
-	tbcClk1, err := clock.NewTBC(testBCCfgPTP4l, leap.GetUtcOffset, pmcMock, testBCCfgPTP4l)
+	tbcClk1, err := clock.NewTBC(testBCCfgPTP4l, 0, leap.GetUtcOffset, pmcMock, testBCCfgPTP4l)
 	require.NoError(t, err)
 	err = eventManager.AddClock(tbcClk1)
 	require.NoError(t, err)
@@ -1050,7 +1050,7 @@ func TestOverallClockStateIntegration(t *testing.T) {
 	}
 
 	secondTBCCfgName := "ptp4l.1.config"
-	tbcClk2, err := clock.NewTBC(secondTBCCfgName, leap.GetUtcOffset, pmcMock, secondTBCCfgName)
+	tbcClk2, err := clock.NewTBC(secondTBCCfgName, 0, leap.GetUtcOffset, pmcMock, secondTBCCfgName)
 	require.NoError(t, err)
 	err = eventManager.AddClock(tbcClk2)
 	require.NoError(t, err)
@@ -1252,7 +1252,7 @@ func TestSyncEIPCIntegration(t *testing.T) {
 	socketCh, cleanup := startIPCSocketListener(t, cache)
 	defer cleanup()
 
-	tbcClk, err := clock.NewTBC(testBCCfgPTP4l, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
+	tbcClk, err := clock.NewTBC(testBCCfgPTP4l, 0, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
 	require.NoError(t, err)
 	err = eventManager.AddClock(tbcClk)
 	require.NoError(t, err)
@@ -1350,56 +1350,32 @@ func TestSyncEIPCIntegration(t *testing.T) {
 
 func TestApplyingSkipsTBCEvents(t *testing.T) {
 	const cfg = "ptp4l.0.config"
-
-	eChannel := make(chan event.Event, 10)
-	em := clockmgr.Init("node", eChannel, nil, nil, nil, nil)
-
+	em := clockmgr.Init("node", nil, nil, nil, nil, nil)
 	pmcMock := &pmc.MockClient{}
-	tbcClk, err := clock.NewTBC(testBCCfgPTP4l, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
+	oldClock, err := clock.NewTBC(cfg, 0, leap.GetUtcOffset, pmcMock, "ptp4.1.config")
 	require.NoError(t, err)
-	err = em.AddClock(tbcClk)
-	require.NoError(t, err)
+	require.NoError(t, em.AddClock(oldClock))
+	ev := event.Event{
+		ProfileGeneration: em.ProfileGeneration(),
+		Source:            event.DPLL, IFace: "ens1f0", CfgName: cfg, ClockType: event.TBC,
+		Data: &event.DPLLData{
+			State:         event.PTP_LOCKED,
+			Offset:        utils.ToPtr[int64](5),
+			LeadingSource: true,
+		},
+	}
 
-	clk := em.GetClock(cfg)
-	require.NotNil(t, clk)
-
-	// Set applying BEFORE starting ProcessEvents
 	em.SetApplying(true)
-	startEventProcessor(t, em)
+	em.ProcessEvent(ev)
+	require.Empty(t, oldClock.ProcessData())
 
-	// Send a DPLL event that would normally be processed
-	eChannel <- event.Event{
-		Source: event.DPLL, IFace: "ens1f0", CfgName: cfg, ClockType: event.TBC,
-		Time: time.Now().UnixMilli(), WriteToLog: true,
-		Data: &event.DPLLData{
-			State:         event.PTP_LOCKED,
-			Offset:        utils.ToPtr[int64](5),
-			LeadingSource: true,
-		},
-	}
-	time.Sleep(200 * time.Millisecond)
-
-	// Clock class should remain 0 (uninitialized) — event was skipped
-	assert.Equal(t, fbprotocol.ClockClass(0), clk.ClockClass(),
-		"TBC events must be skipped while applying")
-
-	// Clear applying and send the same event — now it should be processed
+	em.RemoveAllClocks()
+	newClock, err := clock.NewTBC(cfg, em.ProfileGeneration(), leap.GetUtcOffset, pmcMock, "ptp4.1.config")
+	require.NoError(t, err)
+	require.NoError(t, em.AddClock(newClock))
 	em.SetApplying(false)
-	eChannel <- event.Event{
-		Source: event.DPLL, IFace: "ens1f0", CfgName: cfg, ClockType: event.TBC,
-		Time: time.Now().UnixMilli(), WriteToLog: true,
-		Data: &event.DPLLData{
-			State:         event.PTP_LOCKED,
-			Offset:        utils.ToPtr[int64](5),
-			LeadingSource: true,
-		},
-	}
-	time.Sleep(200 * time.Millisecond)
-
-	// Now the clock should have processed the event (clock class may still be uninitialized
-	// but the internal data should have been populated)
-	clkInternal := em.GetClock(cfg)
-	assert.NotNil(t, clkInternal, "clock should still be registered")
-
-	time.Sleep(50 * time.Millisecond)
+	em.ProcessEvent(ev)
+	require.Empty(t, newClock.ProcessData())
+	em.ProcessEvent(event.Event{ProfileGeneration: em.ProfileGeneration(), Source: ev.Source, CfgName: cfg, IFace: ev.IFace, ClockType: ev.ClockType, Data: ev.Data})
+	require.NotEmpty(t, newClock.ProcessData())
 }

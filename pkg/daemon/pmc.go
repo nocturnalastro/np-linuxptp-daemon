@@ -24,8 +24,9 @@ const (
 )
 
 // NewPMCProcess creates a new PMC process instance for monitoring PTP events.
-func NewPMCProcess(runID int, eventCh chan<- event.Event, clockType event.ClockType, nodeProfile *ptpv1.PtpProfile, waitInterval time.Duration) *PMCProcess {
+func NewPMCProcess(runID int, eventCh chan<- event.Event, clockType event.ClockType, nodeProfile *ptpv1.PtpProfile, waitInterval time.Duration, profileGeneration uint64) *PMCProcess {
 	return &PMCProcess{
+		profileGeneration: profileGeneration,
 		configFileName:    fmt.Sprintf("ptp4l.%d.config", runID),
 		messageTag:        fmt.Sprintf("[ptp4l.%d.config:{level}]", runID),
 		monitorParentData: true,
@@ -46,6 +47,7 @@ func NewPMCProcess(runID int, eventCh chan<- event.Event, clockType event.ClockT
 
 // PMCProcess manages a PMC (PTP Management Client) process for monitoring PTP events.
 type PMCProcess struct {
+	profileGeneration uint64
 	lock              sync.RWMutex
 	configFileName    string
 	monitorPortState  bool
@@ -197,11 +199,11 @@ func (pmc *PMCProcess) run() {
 				pmc.setProcessState(process.Dead)
 			}
 			pmc.ProcessStatus(PtpProcessDown)
-			sendProcessStatusEvent(pmc.eventCh, event.PMC, pmc.configFileName, pmc.clockType, "", PtpProcessDown)
+			sendProcessStatusEvent(pmc.eventCh, event.PMC, pmc.configFileName, pmc.clockType, "", PtpProcessDown, pmc.profileGeneration)
 		}()
 		pmc.setProcessState(process.Running)
 		pmc.ProcessStatus(PtpProcessUp)
-		sendProcessStatusEvent(pmc.eventCh, event.PMC, pmc.configFileName, pmc.clockType, "", PtpProcessUp)
+		sendProcessStatusEvent(pmc.eventCh, event.PMC, pmc.configFileName, pmc.clockType, "", PtpProcessUp, pmc.profileGeneration)
 		_ = pmc.Monitor()
 	}()
 }
@@ -325,11 +327,12 @@ func (pmc *PMCProcess) handleParentDS(parentDS protocol.ParentDataSet) {
 
 	select {
 	case pmc.eventCh <- event.Event{
-		Source:    event.PMC,
-		CfgName:   pmc.configFileName,
-		ClockType: pmc.clockType,
-		Time:      time.Now().UnixMilli(),
-		Data:      &event.ParentDSData{ParentDataSet: parentDS},
+		ProfileGeneration: pmc.profileGeneration,
+		Source:            event.PMC,
+		CfgName:           pmc.configFileName,
+		ClockType:         pmc.clockType,
+		Time:              time.Now().UnixMilli(),
+		Data:              &event.ParentDSData{ParentDataSet: parentDS},
 	}:
 	default:
 		glog.Warning("event channel full, dropping ParentDS update")

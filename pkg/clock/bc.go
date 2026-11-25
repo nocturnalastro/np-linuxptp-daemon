@@ -44,13 +44,13 @@ type BCClock struct {
 }
 
 // NewBC creates a new Boundary clock. If isOC is true, an Ordinary clock will be created instead
-func NewBC(cfgName string, isOC bool, threshold event.PtpClockThreshold) (*BCClock, error) {
+func NewBC(cfgName string, profileGeneration uint64, isOC bool, threshold event.PtpClockThreshold) (*BCClock, error) {
 	clockType := event.BC
 	if isOC {
 		clockType = event.OC
 	}
 	c := &BCClock{
-		BaseClock: newBaseClock(cfgName, threshold),
+		BaseClock: newBaseClock(cfgName, profileGeneration, threshold),
 		clockType: clockType,
 		syncState: event.PTP_NOTSET,
 	}
@@ -78,6 +78,9 @@ func (c *BCClock) GetState() event.PTPState { return c.syncState }
 
 // AddEvent processes an event and updates clock state.
 func (c *BCClock) AddEvent(ev event.Event) SyncState {
+	if !c.acceptsEvent(ev) {
+		return c.currentSyncState()
+	}
 	switch ev.Source {
 	case event.PMC:
 		if ds, ok := ev.Data.(*event.ParentDSData); ok {
@@ -191,12 +194,13 @@ func (c *BCClock) armHoldoverTimer() {
 				return
 			}
 			c.sendEvent(event.Event{
-				Source:    event.PTP4l,
-				CfgName:   c.cfgName,
-				IFace:     iface,
-				ClockType: c.ClockType(),
-				Time:      time.Now().UnixMilli(),
-				Data:      &event.HoldoverExpired{Generation: gen},
+				ProfileGeneration: c.profileGeneration,
+				Source:            event.PTP4l,
+				CfgName:           c.cfgName,
+				IFace:             iface,
+				ClockType:         c.ClockType(),
+				Time:              time.Now().UnixMilli(),
+				Data:              &event.HoldoverExpired{Generation: gen},
 			})
 		}
 	}()

@@ -402,7 +402,7 @@ func TestBCClock_ParentDSUpdate(t *testing.T) {
 
 	t.Run("OC reports SlaveOnly, not the grandmaster class", func(t *testing.T) {
 		rio := &ipcRecorder{}
-		oc, err := NewBC(testPTP4lCfg, true, event.PtpClockThreshold{})
+		oc, err := NewBC(testPTP4lCfg, 0, true, event.PtpClockThreshold{})
 		require.NoError(t, err)
 		oc.SetIPC(rio.send)
 		oc.iface = testEns7f0

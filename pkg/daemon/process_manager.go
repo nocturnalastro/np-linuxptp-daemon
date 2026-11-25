@@ -118,6 +118,13 @@ func (pm *ProcessManager) StartProcesses(ctx context.Context) {
 	})
 }
 
+func (pm *ProcessManager) profileGeneration() uint64 {
+	if pm.clockMgr == nil {
+		return 0
+	}
+	return pm.clockMgr.ProfileGeneration()
+}
+
 func (pm *ProcessManager) processEvents(ctx context.Context) {
 	if pm.waitingProcess == nil {
 		pm.waitingProcess = pm.getWaitingProcesses()
@@ -133,6 +140,15 @@ func (pm *ProcessManager) processEvents(ctx context.Context) {
 			if !ok {
 				glog.V(20).Info("ProcessManager: event forwarder stopped (inbound closed)")
 				return
+			}
+			if ev.ProfileGeneration != pm.profileGeneration() {
+				if observation, ok := ev.Data.(*event.PTPSourceObservation); ok {
+					select {
+					case observation.Reply <- event.SourceQualification{}:
+					default:
+					}
+				}
+				continue
 			}
 			ps, isPS := ev.Data.(*event.ProcessStatusData)
 			if isPS {
@@ -349,11 +365,11 @@ func (pm *ProcessManager) findProcess(ev event.Event) process.Process {
 	return nil
 }
 
-func sendProcessStatusEvent(ch chan<- event.Event, source event.EventSource, cfgName string, clockType event.ClockType, iface string, status int64) {
+func sendProcessStatusEvent(ch chan<- event.Event, source event.EventSource, cfgName string, clockType event.ClockType, iface string, status int64, profileGeneration uint64) {
 	if ch == nil {
 		return
 	}
-	ch <- event.ProcessStatusEvent(source, cfgName, clockType, iface, status)
+	ch <- event.ProcessStatusEvent(source, cfgName, clockType, iface, status, profileGeneration)
 }
 
 func (pm *ProcessManager) stopAllProcesses() {

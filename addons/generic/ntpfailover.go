@@ -83,13 +83,13 @@ func onPTPConfigChangeNtpFailover(data *interface{}, nodeProfile *ptpv1.PtpProfi
 	return nil
 }
 
-func (pd *ntpFailoverPluginData) emitEvent(eventName string) {
+func (pd *ntpFailoverPluginData) emitEvent(eventName string, profileGeneration uint64) {
 	if pd.eventChannel != nil {
-		pd.eventChannel <- event.PluginEvent("ntpfailover", eventName)
+		pd.eventChannel <- event.PluginEvent("ntpfailover", eventName, profileGeneration)
 	}
 }
 
-func processLogNtpFailover(data *interface{}, pname string, log string) string {
+func processLogNtpFailover(data *interface{}, pname string, log string, profileGeneration uint64) string {
 	ret := log
 	if data != nil {
 		_data := *data
@@ -112,7 +112,7 @@ func processLogNtpFailover(data *interface{}, pname string, log string) string {
 				switch pluginData.pcfsmState {
 				case pcsmsStartupDefault:
 					pluginData.pcfsmState = pcsmsActive
-					pluginData.emitEvent(GnssRecoveredEventName)
+					pluginData.emitEvent(GnssRecoveredEventName, profileGeneration)
 					continue
 				case pcsmsActive:
 					if pname == event.Ts2PhcProcessName {
@@ -127,7 +127,7 @@ func processLogNtpFailover(data *interface{}, pname string, log string) string {
 						if currentTime.After(pluginData.expiryTime) {
 							pluginData.pcfsmState = pcsmsFailover
 							glog.Infof("ntpfailover: GNSS failover triggered")
-							pluginData.emitEvent(GnssFailoverEventName)
+							pluginData.emitEvent(GnssFailoverEventName, profileGeneration)
 							continue
 						}
 					}
@@ -137,7 +137,7 @@ func processLogNtpFailover(data *interface{}, pname string, log string) string {
 						if currentTime.Before(pluginData.expiryTime) {
 							pluginData.pcfsmState = pcsmsStartupDefault
 							glog.Infof("ntpfailover: GNSS recovered")
-							pluginData.emitEvent(GnssRecoveredEventName)
+							pluginData.emitEvent(GnssRecoveredEventName, profileGeneration)
 							continue
 						}
 					}

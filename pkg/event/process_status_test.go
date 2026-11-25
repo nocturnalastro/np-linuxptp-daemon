@@ -8,7 +8,8 @@ import (
 )
 
 func TestProcessStatusEvent(t *testing.T) {
-	ev := ProcessStatusEvent(PTP4l, "ptp4l.0.config", OC, "", 0)
+	ev := ProcessStatusEvent(PTP4l, "ptp4l.0.config", OC, "", 0, 7)
+	assert.Equal(t, uint64(7), ev.ProfileGeneration)
 	ps, ok := ev.Data.(*ProcessStatusData)
 	require.True(t, ok)
 	assert.Equal(t, int64(0), ps.Status)
@@ -16,7 +17,7 @@ func TestProcessStatusEvent(t *testing.T) {
 	assert.True(t, ev.WriteToLog)
 	assert.Contains(t, ev.GetLogData(), "PTP_PROCESS_STATUS:0")
 
-	evUp := ProcessStatusEvent(TS2PHC, "ts2phc.0.config", GM, "", 1)
+	evUp := ProcessStatusEvent(TS2PHC, "ts2phc.0.config", GM, "", 1, 0)
 	ps, ok = evUp.Data.(*ProcessStatusData)
 	require.True(t, ok)
 	assert.Equal(t, int64(1), ps.Status)

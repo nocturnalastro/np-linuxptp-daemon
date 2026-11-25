@@ -112,11 +112,12 @@ func GetKubeConfig() (*rest.Config, error) {
 }
 
 type ProcessConfig struct {
-	ClockType       event.ClockType
-	ConfigName      string
-	EventChannel    chan<- event.Event
-	GMThreshold     Threshold
-	InitialPTPState event.PTPState
+	ProfileGeneration uint64
+	ClockType         event.ClockType
+	ConfigName        string
+	EventChannel      chan<- event.Event
+	GMThreshold       Threshold
+	InitialPTPState   event.PTPState
 }
 type Threshold struct {
 	Max             int64

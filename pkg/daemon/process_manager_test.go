@@ -167,16 +167,16 @@ func NewCondiitonsTester(t *testing.T, clockType event.ClockType, cfgNames ...st
 
 		switch clockType {
 		case event.GM:
-			clk, err = clock.NewGM(n, cm.GetUtcOffset, &pmc.MockClient{})
+			clk, err = clock.NewGM(n, 0, cm.GetUtcOffset, &pmc.MockClient{})
 			assert.NoError(t, err)
 		case event.TBC:
-			clk, err = clock.NewTBC(n, cm.GetUtcOffset, &pmc.MockClient{}, "ptp4.1.config")
+			clk, err = clock.NewTBC(n, 0, cm.GetUtcOffset, &pmc.MockClient{}, "ptp4.1.config")
 			assert.NoError(t, err)
 		case event.BC:
-			clk, err = clock.NewBC(n, false, event.PtpClockThreshold{})
+			clk, err = clock.NewBC(n, 0, false, event.PtpClockThreshold{})
 			assert.NoError(t, err)
 		default:
-			clk, err = clock.NewBC(n, true, event.PtpClockThreshold{})
+			clk, err = clock.NewBC(n, 0, true, event.PtpClockThreshold{})
 			assert.NoError(t, err)
 		}
 		err = cm.AddClock(clk)
@@ -237,11 +237,11 @@ func (c *ConditionsTester) sendEvent(ev event.Event) {
 }
 
 func (c *ConditionsTester) SendProcessStatus(source event.EventSource, cfgName string, status int64) {
-	c.sendEvent(event.ProcessStatusEvent(source, cfgName, event.OC, "", status))
+	c.sendEvent(event.ProcessStatusEvent(source, cfgName, event.OC, "", status, 0))
 }
 
 func (c *ConditionsTester) SendPluginEvent(plugin, eventName string) {
-	c.sendEvent(event.PluginEvent(event.EventSource(plugin), eventName))
+	c.sendEvent(event.PluginEvent(event.EventSource(plugin), eventName, 0))
 }
 
 func (c *ConditionsTester) SendOffsetClock(source event.EventSource, _, cfgName string, state event.PTPState, offset int64) {
@@ -791,7 +791,7 @@ func TestEvalActions_FailOverStart(t *testing.T) {
 
 	pm.StartProcesses(ctx)
 	assert.Equal(t, 0, phc2sys.Starts(), "phc2sys should not start before GNSS recovered")
-	inbound <- event.PluginEvent("ntpfailover", generic.GnssRecoveredEventName)
+	inbound <- event.PluginEvent("ntpfailover", generic.GnssRecoveredEventName, 0)
 	select {
 	case <-handler:
 	case <-time.After(2 * time.Second):

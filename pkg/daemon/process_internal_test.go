@@ -21,7 +21,7 @@ func NewTestPtpProcess(cmd ProcessCmd, eventCh chan event.Event) *ptpProcess {
 // NewTestGpsPipeProcess returns a GpsPipe from NewGpsPipeProcess with a
 // caller-supplied cmd and serial-port path (empty serialPort keeps the default).
 func NewTestGpsPipeProcess(messageTag string, eventCh chan event.Event, cmd ProcessCmd, serialPort string, gpsdConfig string) *GpsPipe {
-	gp := NewGpsPipeProcess(messageTag, &ptpv1.PtpProfile{}, eventCh, gpsdConfig).(*GpsPipe)
+	gp := NewGpsPipeProcess(messageTag, &ptpv1.PtpProfile{}, eventCh, gpsdConfig, 0).(*GpsPipe)
 	gp.cmd = cmd
 	if serialPort != "" {
 		gp.serialPort = serialPort

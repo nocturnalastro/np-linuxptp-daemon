@@ -15,7 +15,6 @@ import (
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/event"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/ipc"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/leap"
-	parserconstants "github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/parser/constants"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/process"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/protocol"
 	"github.com/k8snetworkplumbingwg/linuxptp-daemon/pkg/utils"
@@ -42,12 +41,11 @@ type ClockManager struct {
 	clockClassMetric  *prometheus.GaugeVec
 	haMetric          *prometheus.GaugeVec
 	clocks            map[string]clock.Clock // cfgName → Clock
-	osClock           clock.OsClock
+	osClock           *clock.OsClock
 	ipcCache          *ipc.Cache
-	// applyingProfiles is set while applyNodePTPProfiles is tearing down /
-	// restarting processes. When true, T-BC/T-TSC events are skipped so
-	// teardown races cannot emit spurious state transitions.
-	applyingProfiles atomic.Bool
+	// Applying suppresses status writes while profiles are replaced.
+	applyingProfiles  atomic.Bool
+	profileGeneration atomic.Uint64
 	// syncStatusCh is signalled (non-blocking) whenever a clock state transitions.
 	syncStatusCh chan struct{}
 	// statsUpdates holds the latest complete snapshot for ProcessManager. All
@@ -108,9 +106,22 @@ func (m *ClockManager) SetHAMetric(g *prometheus.GaugeVec) {
 	m.haMetric = g
 }
 
-// SetApplying marks whether a PTP profile apply is in progress.
+// SetApplying retires the current clocks and advances the generation when an apply starts.
 func (m *ClockManager) SetApplying(v bool) {
+	m.clockManagementMu.Lock()
+	defer m.clockManagementMu.Unlock()
+	if v && !m.IsApplying() {
+		for _, clk := range m.clocks {
+			clk.StopEvents()
+		}
+		m.osClock.StopEvents()
+		m.profileGeneration.Add(1)
+	}
 	m.applyingProfiles.Store(v)
+}
+
+func (m *ClockManager) ProfileGeneration() uint64 {
+	return m.profileGeneration.Load()
 }
 
 // IsApplying reports whether a PTP profile apply is in progress.
@@ -175,7 +186,7 @@ func Init(nodeName string, processChannel chan event.Event, offsetMetric *promet
 		offsetMetric:     offsetMetric,
 		clockClassMetric: clockClassMetric,
 		clocks:           map[string]clock.Clock{},
-		osClock:          clock.OsClock{State: event.PTP_FREERUN, E3State: event.PTP_NOTSET, IFace: parserconstants.ClockRealTime},
+		osClock:          clock.NewOSClock(0),
 		ipcCache:         ipcCache,
 		syncStatusCh:     make(chan struct{}, 1),
 		statsUpdates:     make(chan process.EventStats, 1),
@@ -195,11 +206,14 @@ func (m *ClockManager) ConfigureOSClockFilter(cfg clock.OSClockFilterConfig) {
 // AddClock takes ownership of a given Clock
 // pmcClient may be nil for clock types that do not use PMC (e.g. BC, OC).
 func (m *ClockManager) AddClock(clk clock.Clock) error {
-	clk.SetIPC(m.sendIPC)
-	clk.SetEventLoopbackFunc(m.sendEvent)
 	m.clockManagementMu.Lock()
 	defer m.clockManagementMu.Unlock()
-	clk.SetOsClock(&m.osClock)
+	if clk.ProfileGeneration() != m.ProfileGeneration() {
+		return fmt.Errorf("clock %s has profile generation %d, want %d", clk.ConfigName(), clk.ProfileGeneration(), m.ProfileGeneration())
+	}
+	clk.SetIPC(m.sendIPC)
+	clk.SetEventLoopbackFunc(m.sendEvent)
+	clk.SetOsClock(m.osClock)
 	// Register the clock under every config name its events may arrive under. For a
 	// ptp4l-based clock this includes the ts2phc alias; for a composite HA clock it
 	// includes each member's config.
@@ -266,7 +280,14 @@ func (m *ClockManager) snapshotStats(requests []process.StatsRequest) process.Ev
 // RemoveAllClocks tears down all registered clocks and cleans up associated state.
 func (m *ClockManager) RemoveAllClocks() {
 	m.clockManagementMu.Lock()
-	m.osClock.Reset()
+	if m.osClock.ProfileGeneration() == m.ProfileGeneration() {
+		m.osClock.Reset()
+	} else {
+		m.osClock = clock.NewOSClock(m.ProfileGeneration())
+	}
+	if m.ipcCache != nil {
+		m.ipcCache.Clear()
+	}
 
 	for cfgName := range m.clocks {
 		m.unregisterMetrics(cfgName, "")
@@ -389,18 +410,24 @@ func (m *ClockManager) ProcessEvents(ctx context.Context) {
 func (m *ClockManager) ProcessEvent(ev event.Event) {
 	m.clockManagementMu.Lock()
 	defer m.clockManagementMu.Unlock()
+	current := ev.ProfileGeneration == m.ProfileGeneration()
 	if observation, ok := ev.Data.(*event.PTPSourceObservation); ok {
 		result := event.SourceQualification{}
-		if clk, exists := m.clocks[ev.CfgName].(*clock.TBC); exists && !m.IsApplying() {
+		if clk, exists := m.clocks[ev.CfgName].(*clock.TBC); exists && current {
 			result = clk.ObserveSource(ev, observation)
 		}
-		m.publishStats()
+		if current {
+			m.publishStats()
+		}
 		// Rejected observations also get a reply; a removed/replaced clock must
 		// not strand its old scanner. Never wait for hardware or a receiver.
 		select {
 		case observation.Reply <- result:
 		default:
 		}
+		return
+	}
+	if !current {
 		return
 	}
 	if ev.Reset {
@@ -425,10 +452,6 @@ func (m *ClockManager) ProcessEvent(ev event.Event) {
 	clk := m.GetClock(lookupName)
 	if clk == nil {
 		glog.Warningf("ProcessEvents: no clock registered for %s, skipping event", lookupName)
-		return
-	}
-
-	if clk.ClockType() == event.TBC && m.IsApplying() {
 		return
 	}
 

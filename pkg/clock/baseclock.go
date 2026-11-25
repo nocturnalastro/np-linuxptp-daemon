@@ -11,8 +11,22 @@ import (
 
 // DataHolder manages process data slice with thread safety.
 type DataHolder struct {
-	data   []*event.Data
-	dataMu sync.RWMutex
+	profileGeneration uint64
+	eventsStopped     bool
+	data              []*event.Data
+	dataMu            sync.RWMutex
+}
+
+func (dh *DataHolder) ProfileGeneration() uint64 {
+	return dh.profileGeneration
+}
+
+func (dh *DataHolder) StopEvents() {
+	dh.eventsStopped = true
+}
+
+func (dh *DataHolder) acceptsEvent(ev event.Event) bool {
+	return !dh.eventsStopped && ev.ProfileGeneration == dh.profileGeneration
 }
 
 // GetData returns the Data entry for the given process, creating one if needed.
@@ -103,8 +117,9 @@ func (c *BaseClock) SetIPC(f func(message ipc.Message)) {
 	c.sendIPC = f
 }
 
-func newBaseClock(cfgName string, threshold event.PtpClockThreshold) BaseClock {
+func newBaseClock(cfgName string, profileGeneration uint64, threshold event.PtpClockThreshold) BaseClock {
 	return BaseClock{
+		DataHolder:       DataHolder{profileGeneration: profileGeneration},
 		cfgName:          cfgName,
 		threshold:        threshold,
 		overallSyncState: event.PTP_NOTSET,

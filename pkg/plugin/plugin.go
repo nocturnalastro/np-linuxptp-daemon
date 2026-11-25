@@ -44,7 +44,7 @@ type AfterRunPTPCommand func(*interface{}, *ptpv1.PtpProfile, string) error
 type SetEventChannel func(*interface{}, chan<- event.Event)
 
 // ProcessLog type
-type ProcessLog func(*interface{}, string, string) string
+type ProcessLog func(*interface{}, string, string, uint64) string
 
 // OnPTPConfigChange is plugin interface
 func (pm *PluginManager) OnPTPConfigChange(nodeProfile *ptpv1.PtpProfile) []error {
@@ -122,7 +122,7 @@ func (pm *PluginManager) SetEventChannel(ch chan<- event.Event) {
 }
 
 // ProcessLog is plugin interface
-func (pm *PluginManager) ProcessLog(pname string, log string) string {
+func (pm *PluginManager) ProcessLog(pname string, log string, profileGeneration uint64) string {
 	ret := log
 
 	for pluginName, pluginObject := range pm.Plugins {
@@ -130,7 +130,7 @@ func (pm *PluginManager) ProcessLog(pname string, log string) string {
 		if pluginFunc != nil {
 			pluginData := pm.Data
 			pluginDataName := pluginData[pluginName]
-			ret = pluginFunc(pluginDataName, pname, ret)
+			ret = pluginFunc(pluginDataName, pname, ret, profileGeneration)
 		}
 	}
 	return ret

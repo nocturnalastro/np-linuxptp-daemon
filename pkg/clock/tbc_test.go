@@ -143,7 +143,7 @@ func TestNewTBCProfileMode(t *testing.T) {
 		{"controller", testControlledCfg, protocol.ClockClassFreerun},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			bc, err := NewTBC(testPTP4lCfg, stubUtcOffset, &pmc.MockClient{}, tc.controlledProfile)
+			bc, err := NewTBC(testPTP4lCfg, 0, stubUtcOffset, &pmc.MockClient{}, tc.controlledProfile)
 			require.NoError(t, err)
 			bc.SetConfiguredLeadingInterface(testLeadingNIC)
 			bc.syncState.State = event.PTP_LOCKED
@@ -155,7 +155,7 @@ func TestNewTBCProfileMode(t *testing.T) {
 }
 
 func TestUpdateStateWithoutDataSetsFaultyOffset(t *testing.T) {
-	bc, err := NewTBC(testPTP4lCfg, stubUtcOffset, &pmc.MockClient{}, "")
+	bc, err := NewTBC(testPTP4lCfg, 0, stubUtcOffset, &pmc.MockClient{}, "")
 	require.NoError(t, err)
 	bc.SetIPC(func(ipc.Message) {})
 	bc.SetOsClock(&OsClock{State: event.PTP_FREERUN})
@@ -202,7 +202,7 @@ func TestUpdateTSCState(t *testing.T) {
 			assert.Empty(t, mock.SnapshotGetCalls(), "T-TSC must not read downstream PMC data")
 			assert.Empty(t, mock.SnapshotSetCalls(), "T-TSC must not update downstream PMC data")
 		})
-		bc, err := NewTBC(testPTP4lCfg, stubUtcOffset, mock, "")
+		bc, err := NewTBC(testPTP4lCfg, 0, stubUtcOffset, mock, "")
 		require.NoError(t, err)
 		bc.SetIPC(func(ipc.Message) {})
 		bc.SetEventLoopbackFunc(func(event.Event) {})
@@ -257,7 +257,7 @@ func TestAnnounceLocalData_Freerun_SetsGMSettingsAndEGP(t *testing.T) {
 	ensureLeapMocked(t)
 	mock := &pmc.MockClient{}
 	cfgName := testCfgName
-	bc, err := NewTBC(cfgName, stubUtcOffset, mock, testControlledCfg)
+	bc, err := NewTBC(cfgName, 0, stubUtcOffset, mock, testControlledCfg)
 	require.NoError(t, err)
 	bc.leadingClockData.clockID = "001122.fffe.334455"
 	bc.syncState = SyncState{

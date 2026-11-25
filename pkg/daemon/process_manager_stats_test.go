@@ -117,7 +117,7 @@ func TestSourceQualificationStartupAndRestart(t *testing.T) {
 	waiter.mu.Lock()
 	waiter.state = process.Dead
 	waiter.mu.Unlock()
-	ct.pm.handleProcessDown(context.Background(), event.ProcessStatusEvent(event.TS2PHC, "ts2phc.0.config", event.TBC, "", PtpProcessDown))
+	ct.pm.handleProcessDown(context.Background(), event.ProcessStatusEvent(event.TS2PHC, "ts2phc.0.config", event.TBC, "", PtpProcessDown, 0))
 	require.Equal(t, 2, waiter.Starts())
 }
 
@@ -224,7 +224,7 @@ func TestStatsUpdatesUseNewestQueuedStateForPluginReconciliation(t *testing.T) {
 	}
 	pm := &ProcessManager{process: []process.Process{waiter}, statsIn: updates, latestStats: ready}
 	updates <- degraded
-	pm.evalActions(context.Background(), event.PluginEvent("plugin", "ready"))
+	pm.evalActions(context.Background(), event.PluginEvent("plugin", "ready", 0))
 	pm.reconcileWaiting(context.Background())
 	assert.Zero(t, waiter.Starts(), "a newer pushed degradation must override the previously cached LOCKED state")
 	updates <- ready

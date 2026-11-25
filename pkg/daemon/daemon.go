@@ -649,9 +649,8 @@ func (dn *Daemon) applyNodePTPProfiles() error {
 
 	glog.Infof("in applyNodePTPProfiles - starting to apply %d node profiles", len(dn.ptpUpdate.NodeProfiles))
 
-	// Suppress T-BC FSM updates during teardown/restart so in-flight DPLL
-	// events after ts2phc Reset cannot emit LOCKED→HOLDOVER / T-BC-STATUS s1.
-	// Also skip NodePtpDevice status writes until apply finishes.
+	// Retire the current clocks before stopping their producers, and suppress
+	// NodePtpDevice status writes until apply finishes.
 	if dn.processManager != nil && dn.processManager.clockMgr != nil {
 		defer dn.processManager.clockMgr.SetApplying(false)
 		dn.syncStatusMu.Lock()
@@ -880,7 +879,7 @@ func (dn *Daemon) applyNodePtpProfile(runID int, nodeProfile *ptpv1.PtpProfile, 
 	var c clock.Clock
 	switch clockType {
 	case event.GM:
-		if c, err = clock.NewGM(clockCfgName, leap.GetUtcOffset, pmc.ActiveClient()); err != nil {
+		if c, err = clock.NewGM(clockCfgName, dn.processManager.profileGeneration(), leap.GetUtcOffset, pmc.ActiveClient()); err != nil {
 			return err
 		}
 	case event.TBC:
@@ -894,7 +893,7 @@ func (dn *Daemon) applyNodePtpProfile(runID int, nodeProfile *ptpv1.PtpProfile, 
 			controlledPortsConfig = getPtp4lConfig(topology.profileRunID[controlledProfileName])
 		}
 
-		if tbc, err = clock.NewTBC(clockCfgName, leap.GetUtcOffset, pmc.ActiveClient(), controlledPortsConfig); err != nil {
+		if tbc, err = clock.NewTBC(clockCfgName, dn.processManager.profileGeneration(), leap.GetUtcOffset, pmc.ActiveClient(), controlledPortsConfig); err != nil {
 			return err
 		}
 		c = tbc
@@ -902,11 +901,11 @@ func (dn *Daemon) applyNodePtpProfile(runID int, nodeProfile *ptpv1.PtpProfile, 
 			tbc.SetConfiguredLeadingInterface(leadingNic)
 		}
 	case event.BC:
-		if c, err = clock.NewBC(clockCfgName, false, th); err != nil {
+		if c, err = clock.NewBC(clockCfgName, dn.processManager.profileGeneration(), false, th); err != nil {
 			return err
 		}
 	case event.OC:
-		if c, err = clock.NewBC(clockCfgName, true, th); err != nil {
+		if c, err = clock.NewBC(clockCfgName, dn.processManager.profileGeneration(), true, th); err != nil {
 			return err
 		}
 	default:
@@ -975,7 +974,7 @@ func (dn *Daemon) createProcesses(runID int, nodeProfile *ptpv1.PtpProfile, topo
 				glog.Infof("Skipping PMC monitoring for GM")
 			} else {
 				// TODO addScheduling
-				pmcProcess := NewPMCProcess(runID, dn.processManager.eventsIn, clockType, nodeProfile, time.Duration(dn.pmcPollInterval)*time.Second)
+				pmcProcess := NewPMCProcess(runID, dn.processManager.eventsIn, clockType, nodeProfile, time.Duration(dn.pmcPollInterval)*time.Second, ptpProc.profileGeneration)
 				ptpProc.depProcess = append(ptpProc.depProcess, pmcProcess)
 			}
 			dprocess = ptpProc
@@ -1047,7 +1046,7 @@ func (dn *Daemon) assembleHAClock(haProfileName string, memberNames []string, to
 
 		// HA member BC: owned by the composite HA clock, not registered standalone.
 		th := dn.prepareProfile(memberProfile)
-		bc, err := clock.NewBC(clockCfgName(memberRunID), false, th)
+		bc, err := clock.NewBC(clockCfgName(memberRunID), dn.processManager.profileGeneration(), false, th)
 		if err != nil {
 			return err
 		}
@@ -1068,7 +1067,7 @@ func (dn *Daemon) assembleHAClock(haProfileName string, memberNames []string, to
 	}
 
 	haCfgName := fmt.Sprintf("%s.%d.config", event.Phc2SysProcessName, haRunID)
-	haClock, err := clock.NewHA(haCfgName, members...)
+	haClock, err := clock.NewHA(haCfgName, dn.processManager.profileGeneration(), members...)
 	if err != nil {
 		return err
 	}
@@ -1167,10 +1166,11 @@ func (dn *Daemon) initHardware(nodeProfile *ptpv1.PtpProfile, pluginErrors []err
 
 func processConfigFor(dprocess *ptpProcess, clockType event.ClockType, eventCh chan event.Event) config.ProcessConfig {
 	cfg := config.ProcessConfig{
-		ClockType:       clockType,
-		ConfigName:      dprocess.configName,
-		EventChannel:    eventCh,
-		InitialPTPState: event.PTP_FREERUN,
+		ProfileGeneration: dprocess.profileGeneration,
+		ClockType:         clockType,
+		ConfigName:        dprocess.configName,
+		EventChannel:      eventCh,
+		InitialPTPState:   event.PTP_FREERUN,
 	}
 	if dprocess.ptpClockThreshold != nil {
 		cfg.GMThreshold = config.Threshold{
@@ -1234,7 +1234,7 @@ func (dn *Daemon) setupGPSDAndGPSPipe(nodeProfile *ptpv1.PtpProfile, dprocess *p
 	dprocess.depProcess = append(dprocess.depProcess, gpsdProcess)
 
 	// init gpspipe
-	gpsPipeProcess := NewGpsPipeProcess(dprocess.messageTag, nodeProfile, dn.processManager.eventsIn, dprocess.configName)
+	gpsPipeProcess := NewGpsPipeProcess(dprocess.messageTag, nodeProfile, dn.processManager.eventsIn, dprocess.configName, dprocess.profileGeneration)
 	dprocess.depProcess = append(dprocess.depProcess, gpsPipeProcess)
 
 	// Ts2phc startup condition

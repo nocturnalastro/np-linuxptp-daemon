@@ -324,6 +324,6 @@ func TestPMCStopCreatedIsStopped(t *testing.T) {
 
 func TestPMCProcess_Profile(t *testing.T) {
 	prof := &ptpv1.PtpProfile{}
-	p := NewPMCProcess(0, nil, event.OC, prof, -1)
+	p := NewPMCProcess(0, nil, event.OC, prof, -1, 0)
 	assert.Equal(t, prof, p.Profile())
 }

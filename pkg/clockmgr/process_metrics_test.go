@@ -50,9 +50,9 @@ func newProcessMetricManager(t *testing.T, clockType event.ClockType) (*ClockMan
 	var err error
 	switch clockType {
 	case event.GM:
-		clk, err = clock.NewGM(testClockmgrPtp4lConfig, func() int { return 37 }, &pmc.MockClient{})
+		clk, err = clock.NewGM(testClockmgrPtp4lConfig, 0, func() int { return 37 }, &pmc.MockClient{})
 	case event.TBC:
-		clk, err = clock.NewTBC(testClockmgrPtp4lConfig, func() int { return 37 }, &pmc.MockClient{}, "")
+		clk, err = clock.NewTBC(testClockmgrPtp4lConfig, 0, func() int { return 37 }, &pmc.MockClient{}, "")
 	default:
 		t.Fatalf("unsupported test clock type %s", clockType)
 	}

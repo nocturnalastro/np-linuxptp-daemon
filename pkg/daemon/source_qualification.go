@@ -120,7 +120,7 @@ func (p *ptpProcess) observeSource(port string, observation *event.PTPSourceObse
 		ctx = context.Background()
 	}
 	observation.Reply = make(chan event.SourceQualification, 1)
-	ev := event.Event{Source: event.PTP4l, CfgName: p.configName, IFace: port, ClockType: p.clockType, Time: time.Now().UnixMilli(), Data: observation}
+	ev := event.Event{ProfileGeneration: p.profileGeneration, Source: event.PTP4l, CfgName: p.configName, IFace: port, ClockType: p.clockType, Time: time.Now().UnixMilli(), Data: observation}
 	if observation.PortRole != nil || observation.SourceLost {
 		// These transitions may not repeat. Wait for delivery, but allow daemon
 		// shutdown to release a sender whose consumer has stopped.

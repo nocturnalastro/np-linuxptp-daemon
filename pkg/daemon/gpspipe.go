@@ -30,34 +30,36 @@ var gpspipeGlobalMutex sync.Mutex
 
 // GpsPipe is a process that pipes GPS data from serial port.
 type GpsPipe struct {
-	name       string
-	execMutex  sync.RWMutex
-	cmdLine    string
-	cmd        ProcessCmd
-	serialPort string
-	stopCh     chan struct{}
-	stopped    bool
-	messageTag string
-	eventCh    chan event.Event
-	state      process.State
-	profile    *ptpv1.PtpProfile
-	conditions map[process.Action]process.Condition
-	wg         sync.WaitGroup
+	profileGeneration uint64
+	name              string
+	execMutex         sync.RWMutex
+	cmdLine           string
+	cmd               ProcessCmd
+	serialPort        string
+	stopCh            chan struct{}
+	stopped           bool
+	messageTag        string
+	eventCh           chan event.Event
+	state             process.State
+	profile           *ptpv1.PtpProfile
+	conditions        map[process.Action]process.Condition
+	wg                sync.WaitGroup
 }
 
 // NewGpsPipeProcess creates a new GpsPipe process instance.
-func NewGpsPipeProcess(messageTag string, nodeProfile *ptpv1.PtpProfile, eventCh chan event.Event, gpsdConfig string) process.Process {
+func NewGpsPipeProcess(messageTag string, nodeProfile *ptpv1.PtpProfile, eventCh chan event.Event, gpsdConfig string, profileGeneration uint64) process.Process {
 	cmdLine := addScheduling(nodeProfile, fmt.Sprintf("/usr/local/bin/gpspipe -v -R -l -o %s", GPSPIPE_SERIALPORT))
 	args := strings.Split(cmdLine, " ")
 
 	gp := &GpsPipe{
-		name:       event.GpsPipeProcessName,
-		cmdLine:    cmdLine,
-		cmd:        NewExecCmd(exec.Command(args[0], args[1:]...)),
-		serialPort: GPSPIPE_SERIALPORT,
-		messageTag: messageTag,
-		profile:    nodeProfile,
-		eventCh:    eventCh,
+		profileGeneration: profileGeneration,
+		name:              event.GpsPipeProcessName,
+		cmdLine:           cmdLine,
+		cmd:               NewExecCmd(exec.Command(args[0], args[1:]...)),
+		serialPort:        GPSPIPE_SERIALPORT,
+		messageTag:        messageTag,
+		profile:           nodeProfile,
+		eventCh:           eventCh,
 		conditions: map[process.Action]process.Condition{
 			process.ActionStart: process.OnProcessUp{
 				Source:     event.GPSD,
@@ -199,7 +201,7 @@ func (gp *GpsPipe) run() {
 				glog.Infof("Process %s exited unexpectedly", gp.name)
 			}
 			gp.ProcessStatus(PtpProcessDown)
-			sendProcessStatusEvent(gp.eventCh, event.GPSPIPE, cfgNameFromMessageTag(gp.messageTag), gp.ClockType(), "", PtpProcessDown)
+			sendProcessStatusEvent(gp.eventCh, event.GPSPIPE, cfgNameFromMessageTag(gp.messageTag), gp.ClockType(), "", PtpProcessDown, gp.profileGeneration)
 		}()
 
 		gp.execMutex.RLock()
@@ -239,7 +241,7 @@ func (gp *GpsPipe) run() {
 			gp.state = process.Running
 			gp.execMutex.Unlock()
 			gp.ProcessStatus(PtpProcessUp)
-			sendProcessStatusEvent(gp.eventCh, event.GPSPIPE, cfgNameFromMessageTag(gp.messageTag), gp.ClockType(), "", PtpProcessUp)
+			sendProcessStatusEvent(gp.eventCh, event.GPSPIPE, cfgNameFromMessageTag(gp.messageTag), gp.ClockType(), "", PtpProcessUp, gp.profileGeneration)
 		}
 
 		err = cmd.Wait()

@@ -35,17 +35,18 @@ import (
 
 // ExecProcess base Process for
 type ExecProcess struct {
-	name       string
-	configName string
-	configPath string
-	messageTag string
-	logFilters []*logfilter.LogFilter
-	eventCh    chan event.Event
-	stopCh     chan struct{}
-	conditions map[process.Action]process.Condition
-	state      process.State
-	wg         sync.WaitGroup
-	execMutex  sync.RWMutex
+	profileGeneration uint64
+	name              string
+	configName        string
+	configPath        string
+	messageTag        string
+	logFilters        []*logfilter.LogFilter
+	eventCh           chan event.Event
+	stopCh            chan struct{}
+	conditions        map[process.Action]process.Condition
+	state             process.State
+	wg                sync.WaitGroup
+	execMutex         sync.RWMutex
 }
 
 // State returns the current process state of ExecProcess.
@@ -205,11 +206,12 @@ func (p *ptpProcess) sendPtp4lOffsetEvent() {
 	glog.Infof("PTP4l offset event: %d", avgOffset)
 	select {
 	case p.eventCh <- event.Event{
-		Source:    event.PTP4l,
-		CfgName:   p.configName,
-		IFace:     p.tBCAttributes.activeTRPort(),
-		ClockType: p.clockType,
-		Time:      time.Now().UnixMilli(),
+		ProfileGeneration: p.profileGeneration,
+		Source:            event.PTP4l,
+		CfgName:           p.configName,
+		IFace:             p.tBCAttributes.activeTRPort(),
+		ClockType:         p.clockType,
+		Time:              time.Now().UnixMilli(),
 		Data: &event.OffsetData{
 			State:  p.tBCAttributes.lastReportedState,
 			Offset: avgOffset,
@@ -322,7 +324,7 @@ func (p *ptpProcess) processOutput(output string) string {
 	if p.name == event.ChronydProcessName {
 		output = fmt.Sprintf("%s[%d]%s: %s", event.ChronydProcessName, p.cmd.Pid(), p.messageTag, output)
 	}
-	output = p.pm.ProcessLog(p.name, output)
+	output = p.pm.ProcessLog(p.name, output, p.profileGeneration)
 	output = p.replaceClockID(output)
 	printWhenNotEmpty(logfilter.FilterOutput(p.logFilters, output))
 	p.processPTPMetrics(output)
@@ -401,7 +403,7 @@ func (p *ptpProcess) run() {
 				glog.Infof("Process %s exited unexpectedly", p.name)
 			}
 			processStatus(p.name, p.messageTag, PtpProcessDown)
-			sendProcessStatusEvent(p.eventCh, event.EventSource(p.name), p.configName, p.clockType, "", PtpProcessDown)
+			sendProcessStatusEvent(p.eventCh, event.EventSource(p.name), p.configName, p.clockType, "", PtpProcessDown, p.profileGeneration)
 			p.updateGMStatusOnProcessDown(p.name)
 		}()
 
@@ -438,7 +440,7 @@ func (p *ptpProcess) run() {
 		p.state = process.Running
 		p.execMutex.Unlock()
 		processStatus(p.name, p.messageTag, PtpProcessUp)
-		sendProcessStatusEvent(p.eventCh, event.EventSource(p.name), p.configName, p.clockType, "", PtpProcessUp)
+		sendProcessStatusEvent(p.eventCh, event.EventSource(p.name), p.configName, p.clockType, "", PtpProcessUp, p.profileGeneration)
 
 		if p.name == event.Ts2PhcProcessName {
 			p.resetPollCycle()
@@ -554,13 +556,14 @@ func (p *ptpProcess) processTs2PhcEvents(ptpOffset float64, source string, iface
 	if source == event.Ts2PhcProcessName { // for ts2phc send it to event to create metrics and events
 		select {
 		case p.eventCh <- event.Event{
-			Source:     event.TS2PHC,
-			CfgName:    p.configName,
-			IFace:      iface,
-			ClockType:  p.clockType,
-			Time:       time.Now().UnixMilli(),
-			WriteToLog: nmeaLocked != nil,
-			Reset:      false,
+			ProfileGeneration: p.profileGeneration,
+			Source:            event.TS2PHC,
+			CfgName:           p.configName,
+			IFace:             iface,
+			ClockType:         p.clockType,
+			Time:              time.Now().UnixMilli(),
+			WriteToLog:        nmeaLocked != nil,
+			Reset:             false,
 			Data: &event.OffsetData{
 				State:      ptpState,
 				Offset:     ptpOffsetInt64,
@@ -651,9 +654,10 @@ func (p *ptpProcess) updateGMStatusOnProcessDown(process string) {
 		// (this nullifies the remaining pieces in the event data if ts2phc was killed during ptp profile change)
 		select {
 		case p.eventCh <- event.Event{
-			Source:  event.TS2PHC,
-			CfgName: p.configName,
-			Reset:   true,
+			ProfileGeneration: p.profileGeneration,
+			Source:            event.TS2PHC,
+			CfgName:           p.configName,
+			Reset:             true,
 		}:
 		default:
 		}
@@ -756,13 +760,14 @@ func (p *ptpProcess) processSynceEvents(logEntry synce.LogEntry) {
 		glog.Info(data)
 		select {
 		case p.eventCh <- event.Event{
-			Source:     event.SYNCE,
-			CfgName:    p.configName,
-			IFace:      iface,
-			Time:       time.Now().UnixMilli(),
-			WriteToLog: true,
-			Reset:      false,
-			Data:       data,
+			ProfileGeneration: p.profileGeneration,
+			Source:            event.SYNCE,
+			CfgName:           p.configName,
+			IFace:             iface,
+			Time:              time.Now().UnixMilli(),
+			WriteToLog:        true,
+			Reset:             false,
+			Data:              data,
 		}:
 		default:
 		}
@@ -836,12 +841,13 @@ func (p *ptpProcess) sendPtp4lStateEvent() {
 	_ = clockID // Ensure linter sees the variable as used
 	select {
 	case p.eventCh <- event.Event{
-		Source:    event.PTP4l,
-		CfgName:   p.configName,
-		IFace:     p.tBCAttributes.activeTRPort(),
-		ClockType: p.clockType,
-		Time:      time.Now().UnixMilli(),
-		Reset:     false,
+		ProfileGeneration: p.profileGeneration,
+		Source:            event.PTP4l,
+		CfgName:           p.configName,
+		IFace:             p.tBCAttributes.activeTRPort(),
+		ClockType:         p.clockType,
+		Time:              time.Now().UnixMilli(),
+		Reset:             false,
 		Data: &event.StateData{
 			State:      p.tBCAttributes.lastReportedState,
 			SourceLost: p.tBCAttributes.lastReportedState != event.PTP_LOCKED,
@@ -981,12 +987,13 @@ func confFor(name string, profile *ptpv1.PtpProfile) *string {
 func newPtpProcess(name, configFile, configPath, socketPath, messageTag string, nodeProfile *ptpv1.PtpProfile, clockType event.ClockType, dn *Daemon) *ptpProcess {
 	return &ptpProcess{
 		ExecProcess: ExecProcess{
-			name:       name,
-			configName: configFile,
-			configPath: configPath,
-			messageTag: messageTag,
-			logFilters: logfilter.GetLogFilters(name, messageTag, nodeProfile.PtpSettings),
-			eventCh:    dn.processManager.eventsIn,
+			name:              name,
+			configName:        configFile,
+			configPath:        configPath,
+			messageTag:        messageTag,
+			logFilters:        logfilter.GetLogFilters(name, messageTag, nodeProfile.PtpSettings),
+			eventCh:           dn.processManager.eventsIn,
+			profileGeneration: dn.processManager.profileGeneration(),
 		},
 		socketPath:        socketPath,
 		depProcess:        []process.Process{},
