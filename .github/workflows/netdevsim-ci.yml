@@ -283,6 +283,7 @@ jobs:
       - name: Clone ptp-operator
         run: |
           git clone --depth 1 --branch "${PTP_BRANCH}" "${PTP_REPO}" /tmp/ptp-operator
+          GOBIN=/tmp/ptp-operator/bin go install sigs.k8s.io/kustomize/kustomize/v5@v5.4.2
           sudo cp -a /tmp/ptp-operator /root/ptp-operator
 
       - name: Download image tarball
