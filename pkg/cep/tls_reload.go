@@ -41,30 +41,30 @@ type tlsMaterial struct {
 func (m *tlsMaterial) reload() error {
 	serverPaths := m.config.ServerTLSPaths()
 	clientPaths := m.config.ClientTLSPaths()
-	files := auth.ReadTLSFiles(append(serverPaths[:], clientPaths[1:]...)...)
+	paths := append(serverPaths[:], clientPaths[1:]...)
+	files := auth.ReadTLSFiles(paths...)
 	var digests [5][sha256.Size]byte
-	for i, file := range files {
+	var inboundReadErrors []error
+	for i, path := range paths {
+		file := files[path]
 		// Unreadable outbound credentials disable callbacks while inbound TLS stays available.
 		if i < callbackCertIndex && file.Err != nil {
-			return fmt.Errorf("read TLS material: %w", file.Err)
+			inboundReadErrors = append(inboundReadErrors, file.Err)
 		}
 		digests[i] = file.Digest
 	}
+	if err := errors.Join(inboundReadErrors...); err != nil {
+		return fmt.Errorf("read TLS material: %w", err)
+	}
 	old := m.current.Load()
-	callbackCert, callbackKey := files[callbackCertIndex], files[callbackKeyIndex]
+	callbackCert, callbackKey := files[paths[callbackCertIndex]], files[paths[callbackKeyIndex]]
 	callbackKeypairPresent := callbackCert.Path != "" && callbackCert.Err == nil &&
 		callbackKey.Path != "" && callbackKey.Err == nil
 	// Retry a present keypair if the outbound client could not be initialized.
 	if old != nil && old.digests == digests && (old.client != nil || !callbackKeypairPresent) {
 		return nil
 	}
-	contents := make(map[string][]byte, len(files))
-	for _, file := range files {
-		if file.Path != "" && file.Err == nil {
-			contents[file.Path] = file.Content
-		}
-	}
-	server, err := m.config.CreateServerTLSConfigFromFiles(contents)
+	server, err := m.config.CreateServerTLSConfigFromFiles(files)
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func (m *tlsMaterial) reload() error {
 	var clientLeaf *x509.Certificate
 	if !m.config.EnableMTLS || callbackKeypairPresent {
 		var clientTLS *tls.Config
-		clientTLS, err = m.config.CreateTLSConfigFromFiles(contents)
+		clientTLS, err = m.config.CreateTLSConfigFromFiles(files)
 		if err == nil {
 			client, err = auth.ConfigureAuthenticatedClient(&http.Client{Timeout: m.timeout}, m.config, clientTLS)
 		}

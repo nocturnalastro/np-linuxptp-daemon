@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -170,28 +171,29 @@ func (c *Config) CreateTLSConfig() (*tls.Config, error) {
 		return nil, nil
 	}
 	paths := c.ClientTLSPaths()
-	files, err := loadTLSFiles(paths[:]...)
-	if err != nil {
+	files := ReadTLSFiles(paths[:]...)
+	if err := tlsReadError(files, paths[:]); err != nil {
 		return nil, err
 	}
 	return c.CreateTLSConfigFromFiles(files)
 }
 
-// CreateTLSConfigFromFiles builds outbound TLS using the supplied PEM bytes.
-func (c *Config) CreateTLSConfigFromFiles(files map[string][]byte) (*tls.Config, error) {
+// CreateTLSConfigFromFiles builds outbound TLS using captured PEM bytes.
+// Callers must check read errors for the configured outbound paths first.
+func (c *Config) CreateTLSConfigFromFiles(files map[string]TLSFile) (*tls.Config, error) {
 	if !c.IsAuthenticationEnabled() {
 		return nil, nil
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if c.EnableMTLS {
-		cert, err := tls.X509KeyPair(files[c.ClientCertPath], files[c.ClientKeyPath])
+		cert, err := tls.X509KeyPair(files[c.ClientCertPath].Content, files[c.ClientKeyPath].Content)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load client certificate: %v", err)
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
 	}
 	if c.CACertPath != "" {
-		caCertPool, err := parseCAPool(files[c.CACertPath])
+		caCertPool, err := parseCAPool(files[c.CACertPath].Content)
 		if err != nil {
 			return nil, err
 		}
@@ -226,22 +228,23 @@ func (c *Config) CreateTLSConfigFromFiles(files map[string][]byte) (*tls.Config,
 // callback cannot serve plaintext once authentication is enabled.
 func (c *Config) CreateServerTLSConfig() (*tls.Config, error) {
 	paths := c.ServerTLSPaths()
-	files, err := loadTLSFiles(paths[:]...)
-	if err != nil {
+	files := ReadTLSFiles(paths[:]...)
+	if err := tlsReadError(files, paths[:]); err != nil {
 		return nil, err
 	}
 	return c.CreateServerTLSConfigFromFiles(files)
 }
 
-// CreateServerTLSConfigFromFiles builds server TLS using the supplied file contents.
-func (c *Config) CreateServerTLSConfigFromFiles(files map[string][]byte) (*tls.Config, error) {
+// CreateServerTLSConfigFromFiles builds server TLS using captured PEM bytes.
+// Callers must check read errors for the configured inbound paths first.
+func (c *Config) CreateServerTLSConfigFromFiles(files map[string]TLSFile) (*tls.Config, error) {
 	if c.ServerCertPath == "" || c.ServerKeyPath == "" {
 		return nil, fmt.Errorf("server certificate and key paths are required for a TLS callback server")
 	}
 
-	cert, keyPairErr := tls.X509KeyPair(files[c.ServerCertPath], files[c.ServerKeyPath])
+	cert, keyPairErr := tls.X509KeyPair(files[c.ServerCertPath].Content, files[c.ServerKeyPath].Content)
 	if keyPairErr != nil {
-		return nil, fmt.Errorf("failed to load server certificate: %v", keyPairErr)
+		return nil, fmt.Errorf("failed to load server certificate: %w", keyPairErr)
 	}
 
 	tlsConfig := &tls.Config{
@@ -250,7 +253,7 @@ func (c *Config) CreateServerTLSConfigFromFiles(files map[string][]byte) (*tls.C
 	}
 
 	if c.CACertPath != "" {
-		caCertPool, err := parseCAPool(files[c.CACertPath])
+		caCertPool, err := parseCAPool(files[c.CACertPath].Content)
 		if err != nil {
 			return nil, err
 		}
@@ -297,39 +300,37 @@ type TLSFile struct {
 	Err     error
 }
 
-// ReadTLSFiles reads each distinct path once and returns results in input order.
-func ReadTLSFiles(paths ...string) []TLSFile {
-	files := make([]TLSFile, len(paths))
-	loaded := make(map[string]TLSFile, len(paths))
-	for i, path := range paths {
+// ReadTLSFiles reads each distinct nonempty path once.
+func ReadTLSFiles(paths ...string) map[string]TLSFile {
+	files := make(map[string]TLSFile, len(paths))
+	for _, path := range paths {
 		if path == "" {
 			continue
 		}
-		file, ok := loaded[path]
-		if !ok {
-			file.Path = path
-			file.Content, file.Err = os.ReadFile(path)
-			if file.Err == nil {
-				file.Digest = sha256.Sum256(file.Content)
-			}
-			loaded[path] = file
+		if _, ok := files[path]; ok {
+			continue
 		}
-		files[i] = file
+		file := TLSFile{Path: path}
+		file.Content, file.Err = os.ReadFile(path)
+		if file.Err == nil {
+			file.Digest = sha256.Sum256(file.Content)
+		}
+		files[path] = file
 	}
 	return files
 }
 
-func loadTLSFiles(paths ...string) (map[string][]byte, error) {
-	files := make(map[string][]byte, len(paths))
-	for _, file := range ReadTLSFiles(paths...) {
-		if file.Err != nil {
-			return nil, fmt.Errorf("read TLS material: %w", file.Err)
-		}
-		if file.Path != "" {
-			files[file.Path] = file.Content
+func tlsReadError(files map[string]TLSFile, paths []string) error {
+	var readErrors []error
+	for _, path := range paths {
+		if err := files[path].Err; err != nil {
+			readErrors = append(readErrors, err)
 		}
 	}
-	return files, nil
+	if err := errors.Join(readErrors...); err != nil {
+		return fmt.Errorf("read TLS material: %w", err)
+	}
+	return nil
 }
 
 // A partially valid bundle must not silently drop one of the configured CAs.
