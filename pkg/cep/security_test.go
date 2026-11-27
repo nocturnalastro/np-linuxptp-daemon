@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -119,6 +120,15 @@ func TestLiveTLSReload(t *testing.T) {
 	current := security.material.current.Load()
 	if current == old {
 		t.Fatal("watcher did not activate rotated TLS material")
+	}
+	for i, path := range []string{next.CACertPath, next.ServerCertPath, next.ServerKeyPath, next.ClientCertPath, next.ClientKeyPath} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.digests[i] != sha256.Sum256(data) {
+			t.Fatalf("snapshot digest does not match rotated TLS material at %s", path)
+		}
 	}
 	if slices.Equal(old.serverLeaf.Raw, current.serverLeaf.Raw) ||
 		slices.Equal(old.clientLeaf.Raw, current.clientLeaf.Raw) {

@@ -168,16 +168,32 @@ func (c *Config) CreateTLSConfig() (*tls.Config, error) {
 	if !c.IsAuthenticationEnabled() {
 		return nil, nil
 	}
+	paths := []string{c.CACertPath}
+	if c.EnableMTLS {
+		paths = append(paths, c.ClientCertPath, c.ClientKeyPath)
+	}
+	files, err := loadTLSFiles(paths...)
+	if err != nil {
+		return nil, err
+	}
+	return c.CreateTLSConfigFromFiles(files)
+}
+
+// CreateTLSConfigFromFiles builds outbound TLS using the supplied PEM bytes.
+func (c *Config) CreateTLSConfigFromFiles(files map[string][]byte) (*tls.Config, error) {
+	if !c.IsAuthenticationEnabled() {
+		return nil, nil
+	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if c.EnableMTLS {
-		cert, err := tls.LoadX509KeyPair(c.ClientCertPath, c.ClientKeyPath)
+		cert, err := tls.X509KeyPair(files[c.ClientCertPath], files[c.ClientKeyPath])
 		if err != nil {
 			return nil, fmt.Errorf("failed to load client certificate: %v", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
 	}
 	if c.CACertPath != "" {
-		caCertPool, err := readCAPool(c.CACertPath)
+		caCertPool, err := parseCAPool(files[c.CACertPath])
 		if err != nil {
 			return nil, err
 		}
@@ -211,11 +227,20 @@ func (c *Config) CreateTLSConfig() (*tls.Config, error) {
 // an authorization mechanism (clause 3.2 — mTLS and/or OAuth), so the consumer
 // callback cannot serve plaintext once authentication is enabled.
 func (c *Config) CreateServerTLSConfig() (*tls.Config, error) {
+	files, err := loadTLSFiles(c.ServerCertPath, c.ServerKeyPath, c.CACertPath)
+	if err != nil {
+		return nil, err
+	}
+	return c.CreateServerTLSConfigFromFiles(files)
+}
+
+// CreateServerTLSConfigFromFiles builds server TLS using the supplied file contents.
+func (c *Config) CreateServerTLSConfigFromFiles(files map[string][]byte) (*tls.Config, error) {
 	if c.ServerCertPath == "" || c.ServerKeyPath == "" {
 		return nil, fmt.Errorf("server certificate and key paths are required for a TLS callback server")
 	}
 
-	cert, keyPairErr := tls.LoadX509KeyPair(c.ServerCertPath, c.ServerKeyPath)
+	cert, keyPairErr := tls.X509KeyPair(files[c.ServerCertPath], files[c.ServerKeyPath])
 	if keyPairErr != nil {
 		return nil, fmt.Errorf("failed to load server certificate: %v", keyPairErr)
 	}
@@ -226,7 +251,7 @@ func (c *Config) CreateServerTLSConfig() (*tls.Config, error) {
 	}
 
 	if c.CACertPath != "" {
-		caCertPool, err := readCAPool(c.CACertPath)
+		caCertPool, err := parseCAPool(files[c.CACertPath])
 		if err != nil {
 			return nil, err
 		}
@@ -251,12 +276,23 @@ func (c *Config) CreateServerTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-// A partially valid bundle must not silently drop one of the configured CAs.
-func readCAPool(path string) (*x509.CertPool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+func loadTLSFiles(paths ...string) (map[string][]byte, error) {
+	files := make(map[string][]byte, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read TLS material: %w", err)
+		}
+		files[path] = data
 	}
+	return files, nil
+}
+
+// A partially valid bundle must not silently drop one of the configured CAs.
+func parseCAPool(data []byte) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	begin := []byte("-----BEGIN CERTIFICATE-----")
 	end := []byte("-----END CERTIFICATE-----")

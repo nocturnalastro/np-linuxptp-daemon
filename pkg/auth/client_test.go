@@ -185,3 +185,37 @@ func TestHTTPMethods_NoAuth(t *testing.T) {
 	}
 	assert.Equal(t, []string{"GET", "POST", "PUT", "DELETE"}, seen)
 }
+
+func TestBuildTLSFromCapturedFiles(t *testing.T) {
+	cert, key, ca := writeTestCerts(t)
+	cfg := &Config{
+		ServerConfig: &ServerConfig{
+			EnableMTLS: true, CACertPath: ca, ServerCertPath: cert, ServerKeyPath: key,
+		},
+		ClientCertPath: cert,
+		ClientKeyPath:  key,
+	}
+	files := make(map[string][]byte)
+	for _, path := range []string{cert, key, ca} {
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		files[path] = data
+		require.NoError(t, os.Remove(path))
+	}
+	server, err := cfg.CreateServerTLSConfigFromFiles(files)
+	require.NoError(t, err)
+	outbound, err := cfg.CreateTLSConfigFromFiles(files)
+	require.NoError(t, err)
+	assert.NotNil(t, server.ClientCAs)
+	assert.NotNil(t, outbound.RootCAs)
+	assert.Equal(t, server.Certificates[0].Certificate, outbound.Certificates[0].Certificate)
+}
+
+func TestConfigureAuthenticatedClientRequiresTLS(t *testing.T) {
+	cfg := &Config{ServerConfig: &ServerConfig{EnableMTLS: true}}
+	client := &http.Client{}
+	configured, err := ConfigureAuthenticatedClient(client, cfg, nil)
+	require.Error(t, err)
+	assert.Nil(t, configured)
+	assert.Nil(t, client.Transport)
+}

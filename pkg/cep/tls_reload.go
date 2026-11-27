@@ -36,45 +36,66 @@ type tlsMaterial struct {
 	current atomic.Pointer[tlsSnapshot]
 }
 
-func (m *tlsMaterial) digests() ([5][sha256.Size]byte, error) {
+type tlsFile struct {
+	path    string
+	content []byte
+	digest  [sha256.Size]byte
+}
+
+func (m *tlsMaterial) readTLSFiles() ([5]tlsFile, error) {
 	cfg := m.config
 	paths := [5]string{cfg.CACertPath, cfg.ServerCertPath, cfg.ServerKeyPath}
 	if cfg.EnableMTLS {
 		paths[callbackCertIndex], paths[callbackKeyIndex] = cfg.ClientCertPath, cfg.ClientKeyPath
 	}
-	var result [5][sha256.Size]byte
+	var files [5]tlsFile
+	loaded := make(map[string]tlsFile, len(paths))
 	for i, path := range paths {
 		if path == "" {
 			continue
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			// An unreadable callback keypair disables pushes only.
-			if i >= callbackCertIndex {
-				continue
+		file, ok := loaded[path]
+		if !ok {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				// An unreadable callback keypair disables pushes only.
+				if i >= callbackCertIndex {
+					continue
+				}
+				return files, fmt.Errorf("read TLS material: %w", err)
 			}
-			return result, fmt.Errorf("read TLS material: %w", err)
+			file = tlsFile{path: path, content: content, digest: sha256.Sum256(content)}
+			loaded[path] = file
 		}
-		result[i] = sha256.Sum256(data)
+		files[i] = file
 	}
-	return result, nil
+	return files, nil
 }
 
 // reload is called by a single writer, first during startup and then by the
 // listener's polling goroutine. Readers use immutable configuration snapshots.
 func (m *tlsMaterial) reload() error {
-	before, err := m.digests()
+	files, err := m.readTLSFiles()
 	if err != nil {
 		return err
 	}
+	var digests [5][sha256.Size]byte
+	for i, file := range files {
+		digests[i] = file.digest
+	}
 	old := m.current.Load()
-	var missing [sha256.Size]byte
-	callbackKeypairPresent := before[callbackCertIndex] != missing && before[callbackKeyIndex] != missing
+	callbackKeypairPresent := files[callbackCertIndex].path != "" && files[callbackKeyIndex].path != ""
 	// Retry a present keypair if the outbound client could not be initialized.
-	if old != nil && old.digests == before && (old.client != nil || !callbackKeypairPresent) {
+	if old != nil && old.digests == digests && (old.client != nil || !callbackKeypairPresent) {
 		return nil
 	}
-	server, err := m.config.CreateServerTLSConfig()
+	contents := make(map[string][]byte, len(files))
+	for _, file := range files {
+		if file.path != "" {
+			contents[file.path] = file.content
+		}
+	}
+	server, err := m.config.CreateServerTLSConfigFromFiles(contents)
 	if err != nil {
 		return err
 	}
@@ -90,7 +111,11 @@ func (m *tlsMaterial) reload() error {
 	var client *http.Client
 	var clientLeaf *x509.Certificate
 	if !m.config.EnableMTLS || callbackKeypairPresent {
-		client, err = auth.NewAuthenticatedClientWithTimeout(m.config, m.timeout)
+		var clientTLS *tls.Config
+		clientTLS, err = m.config.CreateTLSConfigFromFiles(contents)
+		if err == nil {
+			client, err = auth.ConfigureAuthenticatedClient(&http.Client{Timeout: m.timeout}, m.config, clientTLS)
+		}
 		if err == nil && m.config.EnableMTLS {
 			transport := client.Transport.(*auth.AuthenticatedTransport)
 			clientLeaf = transport.TLSClientConfig.Certificates[0].Leaf
@@ -100,29 +125,21 @@ func (m *tlsMaterial) reload() error {
 			if !m.config.EnableMTLS {
 				return err
 			}
-			if old == nil || old.digests != before {
+			if old == nil || old.digests != digests {
 				glog.Warningf("Event callback client unavailable: %v", err)
 			}
 			client, clientLeaf = nil, nil
 		}
 	}
-	// Kubernetes may swap the projected volume symlinks during a read.
-	after, err := m.digests()
-	if err != nil {
-		return err
-	}
-	if before != after {
-		return fmt.Errorf("TLS files changed during reload")
-	}
 	m.current.Store(&tlsSnapshot{
-		digests: after, server: server, client: client,
+		digests: digests, server: server, client: client,
 		serverLeaf: serverLeaf, clientLeaf: clientLeaf,
 	})
 	if old != nil {
 		if old.client != nil {
 			old.client.CloseIdleConnections()
 		}
-		if old.digests != after || old.client != client {
+		if old.digests != digests || old.client != client {
 			glog.Info("Event API TLS material reloaded")
 		}
 	}
