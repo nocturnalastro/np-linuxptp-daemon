@@ -5,9 +5,9 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -36,63 +36,32 @@ type tlsMaterial struct {
 	current atomic.Pointer[tlsSnapshot]
 }
 
-type tlsFile struct {
-	path    string
-	content []byte
-	digest  [sha256.Size]byte
-}
-
-func (m *tlsMaterial) readTLSFiles() ([5]tlsFile, error) {
-	cfg := m.config
-	paths := [5]string{cfg.CACertPath, cfg.ServerCertPath, cfg.ServerKeyPath}
-	if cfg.EnableMTLS {
-		paths[callbackCertIndex], paths[callbackKeyIndex] = cfg.ClientCertPath, cfg.ClientKeyPath
-	}
-	var files [5]tlsFile
-	loaded := make(map[string]tlsFile, len(paths))
-	for i, path := range paths {
-		if path == "" {
-			continue
-		}
-		file, ok := loaded[path]
-		if !ok {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				// An unreadable callback keypair disables pushes only.
-				if i >= callbackCertIndex {
-					continue
-				}
-				return files, fmt.Errorf("read TLS material: %w", err)
-			}
-			file = tlsFile{path: path, content: content, digest: sha256.Sum256(content)}
-			loaded[path] = file
-		}
-		files[i] = file
-	}
-	return files, nil
-}
-
 // reload is called by a single writer, first during startup and then by the
 // listener's polling goroutine. Readers use immutable configuration snapshots.
 func (m *tlsMaterial) reload() error {
-	files, err := m.readTLSFiles()
-	if err != nil {
-		return err
-	}
+	serverPaths := m.config.ServerTLSPaths()
+	clientPaths := m.config.ClientTLSPaths()
+	files := auth.ReadTLSFiles(append(serverPaths[:], clientPaths[1:]...)...)
 	var digests [5][sha256.Size]byte
 	for i, file := range files {
-		digests[i] = file.digest
+		// Unreadable outbound credentials disable callbacks while inbound TLS stays available.
+		if i < callbackCertIndex && file.Err != nil {
+			return fmt.Errorf("read TLS material: %w", file.Err)
+		}
+		digests[i] = file.Digest
 	}
 	old := m.current.Load()
-	callbackKeypairPresent := files[callbackCertIndex].path != "" && files[callbackKeyIndex].path != ""
+	callbackCert, callbackKey := files[callbackCertIndex], files[callbackKeyIndex]
+	callbackKeypairPresent := callbackCert.Path != "" && callbackCert.Err == nil &&
+		callbackKey.Path != "" && callbackKey.Err == nil
 	// Retry a present keypair if the outbound client could not be initialized.
 	if old != nil && old.digests == digests && (old.client != nil || !callbackKeypairPresent) {
 		return nil
 	}
 	contents := make(map[string][]byte, len(files))
 	for _, file := range files {
-		if file.path != "" {
-			contents[file.path] = file.content
+		if file.Path != "" && file.Err == nil {
+			contents[file.Path] = file.Content
 		}
 	}
 	server, err := m.config.CreateServerTLSConfigFromFiles(contents)
@@ -135,6 +104,11 @@ func (m *tlsMaterial) reload() error {
 		digests: digests, server: server, client: client,
 		serverLeaf: serverLeaf, clientLeaf: clientLeaf,
 	})
+	if old == nil || old.digests != digests {
+		if err := errors.Join(callbackCert.Err, callbackKey.Err); err != nil {
+			glog.Warningf("Event callback client unavailable: %v", err)
+		}
+	}
 	if old != nil {
 		if old.client != nil {
 			old.client.CloseIdleConnections()

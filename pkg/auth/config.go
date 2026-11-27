@@ -16,6 +16,7 @@ package auth
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -168,11 +169,8 @@ func (c *Config) CreateTLSConfig() (*tls.Config, error) {
 	if !c.IsAuthenticationEnabled() {
 		return nil, nil
 	}
-	paths := []string{c.CACertPath}
-	if c.EnableMTLS {
-		paths = append(paths, c.ClientCertPath, c.ClientKeyPath)
-	}
-	files, err := loadTLSFiles(paths...)
+	paths := c.ClientTLSPaths()
+	files, err := loadTLSFiles(paths[:]...)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +225,8 @@ func (c *Config) CreateTLSConfigFromFiles(files map[string][]byte) (*tls.Config,
 // an authorization mechanism (clause 3.2 — mTLS and/or OAuth), so the consumer
 // callback cannot serve plaintext once authentication is enabled.
 func (c *Config) CreateServerTLSConfig() (*tls.Config, error) {
-	files, err := loadTLSFiles(c.ServerCertPath, c.ServerKeyPath, c.CACertPath)
+	paths := c.ServerTLSPaths()
+	files, err := loadTLSFiles(paths[:]...)
 	if err != nil {
 		return nil, err
 	}
@@ -276,17 +275,59 @@ func (c *Config) CreateServerTLSConfigFromFiles(files map[string][]byte) (*tls.C
 	return tlsConfig, nil
 }
 
-func loadTLSFiles(paths ...string) (map[string][]byte, error) {
-	files := make(map[string][]byte, len(paths))
-	for _, path := range paths {
+// ServerTLSPaths returns the CA bundle and serving keypair paths.
+func (c *Config) ServerTLSPaths() [3]string {
+	return [3]string{c.CACertPath, c.ServerCertPath, c.ServerKeyPath}
+}
+
+// ClientTLSPaths returns the CA bundle and optional mTLS client keypair paths.
+func (c *Config) ClientTLSPaths() [3]string {
+	paths := [3]string{c.CACertPath}
+	if c.EnableMTLS {
+		paths[1], paths[2] = c.ClientCertPath, c.ClientKeyPath
+	}
+	return paths
+}
+
+// TLSFile holds the result of reading one configured TLS path.
+type TLSFile struct {
+	Path    string
+	Content []byte
+	Digest  [sha256.Size]byte
+	Err     error
+}
+
+// ReadTLSFiles reads each distinct path once and returns results in input order.
+func ReadTLSFiles(paths ...string) []TLSFile {
+	files := make([]TLSFile, len(paths))
+	loaded := make(map[string]TLSFile, len(paths))
+	for i, path := range paths {
 		if path == "" {
 			continue
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read TLS material: %w", err)
+		file, ok := loaded[path]
+		if !ok {
+			file.Path = path
+			file.Content, file.Err = os.ReadFile(path)
+			if file.Err == nil {
+				file.Digest = sha256.Sum256(file.Content)
+			}
+			loaded[path] = file
 		}
-		files[path] = data
+		files[i] = file
+	}
+	return files
+}
+
+func loadTLSFiles(paths ...string) (map[string][]byte, error) {
+	files := make(map[string][]byte, len(paths))
+	for _, file := range ReadTLSFiles(paths...) {
+		if file.Err != nil {
+			return nil, fmt.Errorf("read TLS material: %w", file.Err)
+		}
+		if file.Path != "" {
+			files[file.Path] = file.Content
+		}
 	}
 	return files, nil
 }
