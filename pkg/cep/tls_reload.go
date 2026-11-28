@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -16,14 +17,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-const (
-	tlsReloadInterval = 5 * time.Second
-	callbackCertIndex = 3
-	callbackKeyIndex  = 4
-)
+const tlsReloadInterval = 5 * time.Second
 
 type tlsSnapshot struct {
-	digests    [5][sha256.Size]byte
+	digests    map[string][sha256.Size]byte
 	server     *tls.Config
 	client     *http.Client
 	serverLeaf *x509.Certificate
@@ -41,27 +38,30 @@ type tlsMaterial struct {
 func (m *tlsMaterial) reload() error {
 	serverPaths := m.config.ServerTLSPaths()
 	clientPaths := m.config.ClientTLSPaths()
-	paths := append(serverPaths[:], clientPaths[1:]...)
-	files := auth.ReadTLSFiles(paths...)
-	var digests [5][sha256.Size]byte
-	var inboundReadErrors []error
-	for i, path := range paths {
-		file := files[path]
-		// Unreadable outbound credentials disable callbacks while inbound TLS stays available.
-		if i < callbackCertIndex && file.Err != nil {
-			inboundReadErrors = append(inboundReadErrors, file.Err)
-		}
-		digests[i] = file.Digest
+	files := auth.ReadTLSFiles(append(serverPaths[:], clientPaths[:]...)...)
+	digests := make(map[string][sha256.Size]byte, len(files))
+	for path, file := range files {
+		digests[path] = file.Digest
 	}
-	if err := errors.Join(inboundReadErrors...); err != nil {
+	var readErrors []error
+	for _, path := range serverPaths {
+		readErrors = append(readErrors, files[path].Err)
+	}
+	if err := errors.Join(readErrors...); err != nil {
 		return fmt.Errorf("read TLS material: %w", err)
 	}
 	old := m.current.Load()
-	callbackCert, callbackKey := files[paths[callbackCertIndex]], files[paths[callbackKeyIndex]]
-	callbackKeypairPresent := callbackCert.Path != "" && callbackCert.Err == nil &&
-		callbackKey.Path != "" && callbackKey.Err == nil
+	unchanged := old != nil && maps.Equal(old.digests, digests)
+	var callbackErr error
+	var callbackKeypairPresent bool
+	if m.config.EnableMTLS {
+		callbackCert, certRead := files[m.config.ClientCertPath]
+		callbackKey, keyRead := files[m.config.ClientKeyPath]
+		callbackErr = errors.Join(callbackCert.Err, callbackKey.Err)
+		callbackKeypairPresent = certRead && keyRead && callbackErr == nil
+	}
 	// Retry a present keypair if the outbound client could not be initialized.
-	if old != nil && old.digests == digests && (old.client != nil || !callbackKeypairPresent) {
+	if unchanged && (old.client != nil || !callbackKeypairPresent) {
 		return nil
 	}
 	server, err := m.config.CreateServerTLSConfigFromFiles(files)
@@ -86,17 +86,14 @@ func (m *tlsMaterial) reload() error {
 			client, err = auth.ConfigureAuthenticatedClient(&http.Client{Timeout: m.timeout}, m.config, clientTLS)
 		}
 		if err == nil && m.config.EnableMTLS {
-			transport := client.Transport.(*auth.AuthenticatedTransport)
-			clientLeaf = transport.TLSClientConfig.Certificates[0].Leaf
+			clientLeaf = clientTLS.Certificates[0].Leaf
 			err = checkLeaf(clientLeaf, x509.ExtKeyUsageClientAuth)
 		}
 		if err != nil {
 			if !m.config.EnableMTLS {
 				return err
 			}
-			if old == nil || old.digests != digests {
-				glog.Warningf("Event callback client unavailable: %v", err)
-			}
+			callbackErr = err
 			client, clientLeaf = nil, nil
 		}
 	}
@@ -104,16 +101,14 @@ func (m *tlsMaterial) reload() error {
 		digests: digests, server: server, client: client,
 		serverLeaf: serverLeaf, clientLeaf: clientLeaf,
 	})
-	if old == nil || old.digests != digests {
-		if err := errors.Join(callbackCert.Err, callbackKey.Err); err != nil {
-			glog.Warningf("Event callback client unavailable: %v", err)
-		}
+	if callbackErr != nil && !unchanged {
+		glog.Warningf("Event callback client unavailable: %v", callbackErr)
 	}
 	if old != nil {
 		if old.client != nil {
 			old.client.CloseIdleConnections()
 		}
-		if old.digests != digests || old.client != client {
+		if !unchanged || old.client != client {
 			glog.Info("Event API TLS material reloaded")
 		}
 	}

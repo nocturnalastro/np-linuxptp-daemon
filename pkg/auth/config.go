@@ -294,7 +294,6 @@ func (c *Config) ClientTLSPaths() [3]string {
 
 // TLSFile holds the result of reading one configured TLS path.
 type TLSFile struct {
-	Path    string
 	Content []byte
 	Digest  [sha256.Size]byte
 	Err     error
@@ -310,7 +309,7 @@ func ReadTLSFiles(paths ...string) map[string]TLSFile {
 		if _, ok := files[path]; ok {
 			continue
 		}
-		file := TLSFile{Path: path}
+		var file TLSFile
 		file.Content, file.Err = os.ReadFile(path)
 		if file.Err == nil {
 			file.Digest = sha256.Sum256(file.Content)

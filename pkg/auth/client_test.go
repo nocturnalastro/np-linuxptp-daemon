@@ -196,9 +196,9 @@ func TestBuildTLSFromCapturedFiles(t *testing.T) {
 		ClientKeyPath:  key,
 	}
 	files := ReadTLSFiles(cert, key, ca)
-	for _, file := range files {
+	for path, file := range files {
 		require.NoError(t, file.Err)
-		require.NoError(t, os.Remove(file.Path))
+		require.NoError(t, os.Remove(path))
 	}
 	server, err := cfg.CreateServerTLSConfigFromFiles(files)
 	require.NoError(t, err)

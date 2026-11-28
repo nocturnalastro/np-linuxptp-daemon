@@ -121,12 +121,12 @@ func TestLiveTLSReload(t *testing.T) {
 	if current == old {
 		t.Fatal("watcher did not activate rotated TLS material")
 	}
-	for i, path := range []string{next.CACertPath, next.ServerCertPath, next.ServerKeyPath, next.ClientCertPath, next.ClientKeyPath} {
+	for _, path := range []string{cfg.CACertPath, cfg.ServerCertPath, cfg.ServerKeyPath, cfg.ClientCertPath, cfg.ClientKeyPath} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if current.digests[i] != sha256.Sum256(data) {
+		if current.digests[path] != sha256.Sum256(data) {
 			t.Fatalf("snapshot digest does not match rotated TLS material at %s", path)
 		}
 	}
