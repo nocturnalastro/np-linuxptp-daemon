@@ -6,8 +6,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"maps"
 	"net/http"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -16,14 +16,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-const (
-	tlsReloadInterval = 5 * time.Second
-	callbackCertIndex = 3
-	callbackKeyIndex  = 4
-)
+const tlsReloadInterval = 5 * time.Second
 
 type tlsSnapshot struct {
-	digests    [5][sha256.Size]byte
+	digests    map[string][sha256.Size]byte
 	server     *tls.Config
 	client     *http.Client
 	serverLeaf *x509.Certificate
@@ -36,45 +32,33 @@ type tlsMaterial struct {
 	current atomic.Pointer[tlsSnapshot]
 }
 
-func (m *tlsMaterial) digests() ([5][sha256.Size]byte, error) {
-	cfg := m.config
-	paths := [5]string{cfg.CACertPath, cfg.ServerCertPath, cfg.ServerKeyPath}
-	if cfg.EnableMTLS {
-		paths[callbackCertIndex], paths[callbackKeyIndex] = cfg.ClientCertPath, cfg.ClientKeyPath
-	}
-	var result [5][sha256.Size]byte
-	for i, path := range paths {
-		if path == "" {
-			continue
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			// An unreadable callback keypair disables pushes only.
-			if i >= callbackCertIndex {
-				continue
-			}
-			return result, fmt.Errorf("read TLS material: %w", err)
-		}
-		result[i] = sha256.Sum256(data)
-	}
-	return result, nil
-}
-
 // reload is called by a single writer, first during startup and then by the
 // listener's polling goroutine. Readers use immutable configuration snapshots.
 func (m *tlsMaterial) reload() error {
-	before, err := m.digests()
+	serverPaths := m.config.ServerTLSPaths()
+	files, err := auth.ReadTLSFiles(nil, serverPaths[:]...)
 	if err != nil {
 		return err
 	}
+	var callbackErr error
+	if m.config.EnableMTLS {
+		files, callbackErr = auth.ReadTLSFiles(files, m.config.ClientCertPath, m.config.ClientKeyPath)
+	}
+	digests := make(map[string][sha256.Size]byte, len(files))
+	for path, content := range files {
+		if content != nil {
+			digests[path] = sha256.Sum256(content)
+		}
+	}
 	old := m.current.Load()
-	var missing [sha256.Size]byte
-	callbackKeypairPresent := before[callbackCertIndex] != missing && before[callbackKeyIndex] != missing
+	unchanged := old != nil && maps.Equal(old.digests, digests)
+	callbackKeypairPresent := m.config.EnableMTLS && callbackErr == nil &&
+		files[m.config.ClientCertPath] != nil && files[m.config.ClientKeyPath] != nil
 	// Retry a present keypair if the outbound client could not be initialized.
-	if old != nil && old.digests == before && (old.client != nil || !callbackKeypairPresent) {
+	if unchanged && (old.client != nil || !callbackKeypairPresent) {
 		return nil
 	}
-	server, err := m.config.CreateServerTLSConfig()
+	server, err := m.config.CreateServerTLSConfigFromFiles(files)
 	if err != nil {
 		return err
 	}
@@ -90,39 +74,35 @@ func (m *tlsMaterial) reload() error {
 	var client *http.Client
 	var clientLeaf *x509.Certificate
 	if !m.config.EnableMTLS || callbackKeypairPresent {
-		client, err = auth.NewAuthenticatedClientWithTimeout(m.config, m.timeout)
+		var clientTLS *tls.Config
+		clientTLS, err = m.config.CreateTLSConfigFromFiles(files)
+		if err == nil {
+			client, err = auth.ConfigureAuthenticatedClient(&http.Client{Timeout: m.timeout}, m.config, clientTLS)
+		}
 		if err == nil && m.config.EnableMTLS {
-			transport := client.Transport.(*auth.AuthenticatedTransport)
-			clientLeaf = transport.TLSClientConfig.Certificates[0].Leaf
+			clientLeaf = clientTLS.Certificates[0].Leaf
 			err = checkLeaf(clientLeaf, x509.ExtKeyUsageClientAuth)
 		}
 		if err != nil {
 			if !m.config.EnableMTLS {
 				return err
 			}
-			if old == nil || old.digests != before {
-				glog.Warningf("Event callback client unavailable: %v", err)
-			}
+			callbackErr = err
 			client, clientLeaf = nil, nil
 		}
 	}
-	// Kubernetes may swap the projected volume symlinks during a read.
-	after, err := m.digests()
-	if err != nil {
-		return err
-	}
-	if before != after {
-		return fmt.Errorf("TLS files changed during reload")
-	}
 	m.current.Store(&tlsSnapshot{
-		digests: after, server: server, client: client,
+		digests: digests, server: server, client: client,
 		serverLeaf: serverLeaf, clientLeaf: clientLeaf,
 	})
+	if callbackErr != nil && !unchanged {
+		glog.Warningf("Event callback client unavailable: %v", callbackErr)
+	}
 	if old != nil {
 		if old.client != nil {
 			old.client.CloseIdleConnections()
 		}
-		if old.digests != after || old.client != client {
+		if !unchanged || old.client != client {
 			glog.Info("Event API TLS material reloaded")
 		}
 	}

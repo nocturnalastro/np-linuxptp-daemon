@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -168,16 +169,30 @@ func (c *Config) CreateTLSConfig() (*tls.Config, error) {
 	if !c.IsAuthenticationEnabled() {
 		return nil, nil
 	}
+	paths := c.ClientTLSPaths()
+	files, err := ReadTLSFiles(nil, paths[:]...)
+	if err != nil {
+		return nil, err
+	}
+	return c.CreateTLSConfigFromFiles(files)
+}
+
+// CreateTLSConfigFromFiles builds outbound TLS using captured PEM bytes.
+// Callers must check read errors for the configured outbound paths first.
+func (c *Config) CreateTLSConfigFromFiles(files map[string][]byte) (*tls.Config, error) {
+	if !c.IsAuthenticationEnabled() {
+		return nil, nil
+	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if c.EnableMTLS {
-		cert, err := tls.LoadX509KeyPair(c.ClientCertPath, c.ClientKeyPath)
+		cert, err := tls.X509KeyPair(files[c.ClientCertPath], files[c.ClientKeyPath])
 		if err != nil {
-			return nil, fmt.Errorf("failed to load client certificate: %v", err)
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
 	}
 	if c.CACertPath != "" {
-		caCertPool, err := readCAPool(c.CACertPath)
+		caCertPool, err := parseCAPool(files[c.CACertPath])
 		if err != nil {
 			return nil, err
 		}
@@ -211,13 +226,24 @@ func (c *Config) CreateTLSConfig() (*tls.Config, error) {
 // an authorization mechanism (clause 3.2 — mTLS and/or OAuth), so the consumer
 // callback cannot serve plaintext once authentication is enabled.
 func (c *Config) CreateServerTLSConfig() (*tls.Config, error) {
+	paths := c.ServerTLSPaths()
+	files, err := ReadTLSFiles(nil, paths[:]...)
+	if err != nil {
+		return nil, err
+	}
+	return c.CreateServerTLSConfigFromFiles(files)
+}
+
+// CreateServerTLSConfigFromFiles builds server TLS using captured PEM bytes.
+// Callers must check read errors for the configured inbound paths first.
+func (c *Config) CreateServerTLSConfigFromFiles(files map[string][]byte) (*tls.Config, error) {
 	if c.ServerCertPath == "" || c.ServerKeyPath == "" {
 		return nil, fmt.Errorf("server certificate and key paths are required for a TLS callback server")
 	}
 
-	cert, keyPairErr := tls.LoadX509KeyPair(c.ServerCertPath, c.ServerKeyPath)
+	cert, keyPairErr := tls.X509KeyPair(files[c.ServerCertPath], files[c.ServerKeyPath])
 	if keyPairErr != nil {
-		return nil, fmt.Errorf("failed to load server certificate: %v", keyPairErr)
+		return nil, fmt.Errorf("failed to load server certificate: %w", keyPairErr)
 	}
 
 	tlsConfig := &tls.Config{
@@ -226,7 +252,7 @@ func (c *Config) CreateServerTLSConfig() (*tls.Config, error) {
 	}
 
 	if c.CACertPath != "" {
-		caCertPool, err := readCAPool(c.CACertPath)
+		caCertPool, err := parseCAPool(files[c.CACertPath])
 		if err != nil {
 			return nil, err
 		}
@@ -251,12 +277,45 @@ func (c *Config) CreateServerTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-// A partially valid bundle must not silently drop one of the configured CAs.
-func readCAPool(path string) (*x509.CertPool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+// ServerTLSPaths returns the CA bundle and serving keypair paths.
+func (c *Config) ServerTLSPaths() [3]string {
+	return [3]string{c.CACertPath, c.ServerCertPath, c.ServerKeyPath}
+}
+
+// ClientTLSPaths returns the CA bundle and optional mTLS client keypair paths.
+func (c *Config) ClientTLSPaths() [3]string {
+	paths := [3]string{c.CACertPath}
+	if c.EnableMTLS {
+		paths[1], paths[2] = c.ClientCertPath, c.ClientKeyPath
 	}
+	return paths
+}
+
+// ReadTLSFiles adds unread paths to files and joins any new read errors.
+func ReadTLSFiles(files map[string][]byte, paths ...string) (map[string][]byte, error) {
+	if files == nil {
+		files = make(map[string][]byte, len(paths))
+	}
+	var readErrors []error
+	for _, path := range paths {
+		if _, read := files[path]; path == "" || read {
+			continue
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			readErrors = append(readErrors, err)
+			continue
+		}
+		files[path] = content
+	}
+	if err := errors.Join(readErrors...); err != nil {
+		return files, fmt.Errorf("read TLS material: %w", err)
+	}
+	return files, nil
+}
+
+// A partially valid bundle must not silently drop one of the configured CAs.
+func parseCAPool(data []byte) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	begin := []byte("-----BEGIN CERTIFICATE-----")
 	end := []byte("-----END CERTIFICATE-----")

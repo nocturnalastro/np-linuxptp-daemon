@@ -15,6 +15,7 @@
 package auth
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"strings"
@@ -44,6 +45,14 @@ func NewAuthenticatedClientWithTimeout(cfg *Config, timeout time.Duration) (*htt
 	tlsConfig, err := cfg.CreateTLSConfig()
 	if err != nil {
 		return nil, fmt.Errorf("create client TLS configuration: %w", err)
+	}
+	return ConfigureAuthenticatedClient(client, cfg, tlsConfig)
+}
+
+// ConfigureAuthenticatedClient installs authentication on a new client with a prepared TLS config.
+func ConfigureAuthenticatedClient(client *http.Client, cfg *Config, tlsConfig *tls.Config) (*http.Client, error) {
+	if tlsConfig == nil {
+		return nil, fmt.Errorf("TLS configuration is required for an authenticated client")
 	}
 	if cfg.EnableOAuth {
 		if _, err := cfg.GetOAuthToken(); err != nil {

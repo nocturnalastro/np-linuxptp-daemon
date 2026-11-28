@@ -331,3 +331,15 @@ func TestIsAuthenticationEnabled(t *testing.T) {
 	assert.True(t, (&Config{ServerConfig: &ServerConfig{EnableMTLS: true}}).IsAuthenticationEnabled())
 	assert.True(t, (&Config{ServerConfig: &ServerConfig{EnableOAuth: true}}).IsAuthenticationEnabled())
 }
+
+func TestReadTLSFilesRetriesFailedPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tls.pem")
+	files, err := ReadTLSFiles(nil, path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	assert.NotContains(t, files, path)
+
+	require.NoError(t, os.WriteFile(path, []byte("pem"), 0600))
+	files, err = ReadTLSFiles(files, path)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("pem"), files[path])
+}
